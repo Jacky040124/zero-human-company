@@ -159,19 +159,18 @@ describe('Band external-agent coordination', () => {
     expect(provider.capabilities().operations).toEqual(['external_agents.negotiate'])
     expect(coordinator.createdChats).toBe(1)
     expect(coordinator.sent[0]?.content).toContain(`ZHC_OPERATION_ID:${stableBandOperationId('idem-1')}`)
-    expect(coordinator.sent[0]?.mentions).toEqual([])
-    expect(coordinator.sent[1]?.content).toContain(`ZHC_BRIEF_ID:${stableBandOperationId('idem-1')}`)
-    expect(coordinator.sent[1]?.content).not.toContain('idem-1')
+    expect(coordinator.sent[0]?.content).toContain(`ZHC_BRIEF_ID:${stableBandOperationId('idem-1')}`)
+    expect(coordinator.sent[0]?.content).not.toContain('idem-1')
     expect(coordinator.participants).toEqual([
       { chatId: 'chat-1', participantId: 'researcher', role: 'member' },
       { chatId: 'chat-1', participantId: 'policy', role: 'member' },
     ])
-    expect(coordinator.sent[1]?.mentions).toEqual([
+    expect(coordinator.sent[0]?.mentions).toEqual([
       { id: 'researcher', handle: 'team/researcher', name: 'researcher agent' },
     ])
-    expect(coordinator.sent[1]?.content).toContain('@team/researcher')
-    expect(coordinator.sent[1]?.content).toContain('policy agent')
-    expect(coordinator.sent[1]?.content).not.toContain('@team/policy')
+    expect(coordinator.sent[0]?.content).toContain('@team/researcher')
+    expect(coordinator.sent[0]?.content).toContain('policy agent')
+    expect(coordinator.sent[0]?.content).not.toContain('@team/policy')
     expect(result.data.externalAgentIds).toEqual({
       negotiator: 'negotiator',
       researcher: 'researcher',
@@ -344,9 +343,9 @@ describe('Band external-agent coordination', () => {
     })
 
     expect(result?.status).toBe('COMPLETE')
-    expect(coordinator.sent).toHaveLength(2)
+    expect(coordinator.sent).toHaveLength(1)
     expect(coordinator.sent[0]?.content).toContain(`ZHC_OPERATION_ID:${stableBandOperationId('idem-resume')}`)
-    expect(coordinator.sent[1]?.content).toContain(`ZHC_BRIEF_ID:${stableBandOperationId('idem-resume')}`)
+    expect(coordinator.sent[0]?.content).toContain(`ZHC_BRIEF_ID:${stableBandOperationId('idem-resume')}`)
   })
 
   it('rejects ambiguous operation markers across rooms', async () => {

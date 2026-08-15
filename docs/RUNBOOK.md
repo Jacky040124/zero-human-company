@@ -27,7 +27,7 @@ Band is the room, identity, message-routing, and audit layer. The three agent br
 1. In Band, create three **External** identities for the Researcher, Negotiator, and Policy Reviewer roles. Display names may be customized because the worker routes by configured immutable agent ID.
 2. Put each agent's ID and its own API key into the matching `BAND_*_AGENT_ID` and `BAND_*_API_KEY` variables. There is no shared generic Band key.
 3. Keep the Render worker at one instance. It opens one persistent WebSocket per identity; a second instance would duplicate connections and can duplicate replies.
-4. The web/Workflow side creates a room, persists a deterministic non-secret operation marker for reconciliation, adds all three identities, starts the Researcher with an explicit mention, and accepts only a verdict authored by the Policy Reviewer.
+4. The web/Workflow side durably retains the new room ID, adds all three identities, persists a deterministic non-secret operation marker for reconciliation, starts the Researcher with an explicit mention, and accepts only a verdict authored by the Policy Reviewer.
 5. Each identity owns a separate persistent Codex thread per Band room using `gpt-5.6-sol`. The thread-ID file and Codex login cache live on the worker's `/var/data` persistent disk. The Docker worker installs Linux `bubblewrap` and writes a deny-by-default Codex permission profile: commands can read only minimal runtime files and the dedicated empty message workspace, while the repository, root `.env.local`, and Codex login cache remain outside the readable boundary. Network and web search are disabled.
 
 For local testing, sign in with Codex on your machine, then run exactly one worker process:

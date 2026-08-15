@@ -410,6 +410,8 @@ model ProviderAction {
   providerExternalId String?
   redactedResponse   Json?
   lastError          String?
+  leaseToken         String?
+  leaseExpiresAt     DateTime?
   runAfter           DateTime             @default(now())
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt

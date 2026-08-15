@@ -103,7 +103,6 @@ export function stableBandOperationId(idempotencyKey: string): string {
 
 const operationMarker = (operationId: string) => `ZHC_OPERATION_ID:${operationId}`
 const briefMarker = (operationId: string) => `ZHC_BRIEF_ID:${operationId}`
-const markerMessage = (operationId: string) => `Internal reconciliation marker: ${operationMarker(operationId)}.`
 
 function apiKeyFor(config: BandConfig, agentId: string): string {
   if (agentId === config.negotiatorAgentId) return config.negotiatorApiKey ?? config.apiKey ?? ''
@@ -332,6 +331,7 @@ function negotiationBrief(
     ? ''
     : `\nNegotiation price context: ${currency} ${payload.askingPrice}.`
   return [
+    `Internal reconciliation marker: ${operationMarker(operationId)}.`,
     `Internal brief marker: ${briefMarker(operationId)}.`,
     `${mentionLabel(researcher)} research the negotiation context, then explicitly hand the evidence to the Negotiator.`,
     `${policy.name} must receive the Negotiator's proposal before independently enforcing the local policy and publishing the final verdict.`,
@@ -405,7 +405,6 @@ export class BandExternalAgentProvider implements ProviderPort<BandNegotiationRe
       throw error
     }
     try {
-      await this.coordinator.sendMessage(chatId, markerMessage(operationId), [])
       return await this.resumeChat(chatId, request.payload, researcher, policy, operationId)
     } catch (error) {
       if (error instanceof ProviderOutcomeUnknownError) throw error
@@ -444,8 +443,6 @@ export class BandExternalAgentProvider implements ProviderPort<BandNegotiationRe
       const hintedChat = chats.find((candidate) => candidate.id === hintedId)
       if (!hintedChat) return null
       chat = hintedChat
-      await this.coordinator.sendMessage(chat.id, markerMessage(operationId), [])
-      contexts.set(chat.id, await this.coordinator.getChatContext(chat.id))
     }
     if (!chat) return null
 
