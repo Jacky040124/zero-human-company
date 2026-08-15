@@ -24,7 +24,7 @@ The judged artifact is one persisted `DemoRun`. Never combine proof from rehears
 
 Band is the room, identity, message-routing, and audit layer. The three agent brains run in our Render worker:
 
-1. In Band, create three **External** agents named exactly `Researcher`, `Negotiator`, and `Policy Reviewer`.
+1. In Band, create three **External** identities for the Researcher, Negotiator, and Policy Reviewer roles. Display names may be customized because the worker routes by configured immutable agent ID.
 2. Put each agent's ID and its own API key into the matching `BAND_*_AGENT_ID` and `BAND_*_API_KEY` variables. There is no shared generic Band key.
 3. Keep the Render worker at one instance. It opens one persistent WebSocket per identity; a second instance would duplicate connections and can duplicate replies.
 4. The web/Workflow side creates a room using a stable task ID, adds all three identities, starts the Researcher with an explicit mention, and accepts only a verdict authored by the Policy Reviewer.

@@ -126,6 +126,29 @@ describe('Band role handler', () => {
     )
   })
 
+  it('routes by configured identity when display names are customized', async () => {
+    const sendMessage = vi.fn(async () => ({}))
+    const handler = createRoleHandler('researcher', vi.fn(async () => ({
+      text: 'Verified evidence.', runtime: 'CODEX' as const, model: CODEX_BAND_AGENT_MODEL,
+    })), { negotiator: 'configured-negotiator-id' })
+
+    await handler({
+      roomId: 'room-custom-names',
+      message: { content: 'brief' },
+      tools: {
+        getParticipants: async () => [
+          { id: 'configured-negotiator-id', name: 'ZHC Negotiator', handle: 'team/zhc-negotiator', type: 'agent' },
+          { id: 'other-id', name: 'Negotiator', type: 'agent' },
+        ],
+        sendMessage,
+      },
+    })
+
+    expect(sendMessage.mock.calls[0]?.[1]).toEqual([
+      { id: 'configured-negotiator-id', name: 'ZHC Negotiator', handle: 'team/zhc-negotiator' },
+    ])
+  })
+
   it('delivers the Policy Reviewer verdict to Negotiator context', async () => {
     const sendMessage = vi.fn(async () => ({}))
     const handler = createRoleHandler('policyReviewer', vi.fn(async () => ({

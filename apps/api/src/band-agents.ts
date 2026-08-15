@@ -46,12 +46,12 @@ const ROLE_NAMES: Record<BandAgentRole, string> = {
   policyReviewer: 'Policy Reviewer',
 }
 
-const ROLE_TARGETS: Record<BandAgentRole, string[]> = {
-  researcher: ['Negotiator'],
-  negotiator: ['Policy Reviewer'],
+const ROLE_TARGETS: Record<BandAgentRole, BandAgentRole[]> = {
+  researcher: ['negotiator'],
+  negotiator: ['policyReviewer'],
   // Band REST chat context is identity-scoped. Mention the Negotiator so the
   // provider identity that owns the room can hydrate and verify the verdict.
-  policyReviewer: ['Negotiator'],
+  policyReviewer: ['negotiator'],
 }
 
 export function rolePrompt(role: BandAgentRole): string {
@@ -150,16 +150,23 @@ export function formatPolicyResponse(value: string, proof?: BrainProof): string 
 
 type RoleTools = Pick<AdapterToolsProtocol, 'getParticipants' | 'sendMessage'>
 
-export function createRoleHandler(role: BandAgentRole, brain: RoleBrain) {
+export function createRoleHandler(
+  role: BandAgentRole,
+  brain: RoleBrain,
+  configuredAgentIds?: Partial<Record<BandAgentRole, string>>,
+) {
   return async ({ roomId, message, tools }: { roomId: string; message: { content: string }; tools: RoleTools }): Promise<void> => {
     // The Policy Reviewer mentions the Negotiator to make the final verdict
     // visible to its identity-scoped REST context. Do not turn that delivery
     // mention into another negotiation turn.
     if (role === 'negotiator' && message.content.trimStart().startsWith('ZHC_VERDICT')) return
     const participants = await tools.getParticipants()
-    const mentions = ROLE_TARGETS[role].map((targetName) => {
+    const mentions = ROLE_TARGETS[role].map((targetRole) => {
+      const targetName = ROLE_NAMES[targetRole]
+      const configuredId = configuredAgentIds?.[targetRole]
       const normalizedTarget = targetName.toLowerCase()
-      const participant = participants.find((candidate) => candidate.name.toLowerCase() === normalizedTarget
+      const participant = participants.find((candidate) => candidate.id === configuredId
+        || candidate.name.toLowerCase() === normalizedTarget
         || candidate.handle?.toLowerCase() === normalizedTarget.replaceAll(' ', '-'))
       if (!participant) throw new Error(`${ROLE_NAMES[role]} could not resolve required participant ${targetName}`)
       return {
@@ -477,7 +484,9 @@ type ManagedAgent = Pick<Agent, 'run' | 'stop'>
 type AgentFactory = (role: BandAgentRole, identity: BandAgentIdentity, brain: RoleBrain, config: BandAgentsConfig) => ManagedAgent
 
 const defaultAgentFactory: AgentFactory = (role, identity, brain, config) => Agent.create({
-  adapter: new GenericAdapter(createRoleHandler(role, brain)),
+  adapter: new GenericAdapter(createRoleHandler(role, brain, Object.fromEntries(
+    BAND_AGENT_ROLES.map((configuredRole) => [configuredRole, config.agents[configuredRole].agentId]),
+  ))),
   linkOptions: { conflictPolicy: 'supersede' },
   config: {
     agentId: identity.agentId,
