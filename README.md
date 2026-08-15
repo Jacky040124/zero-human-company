@@ -8,4 +8,4 @@ An agent-run company that autonomously runs a sales motion end-to-end: buyer dis
 - **[`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md)** — the one-shot backend build spec (architecture, schema, contracts, provider matrix, judge-mode rules, definition of done).
 
 ## Status
-Spec is **draft v1, pending architecture review**. An approved v2 (backend-focused, contract-first for the frontend) will replace it before implementation begins. Frontend is being built separately.
+Spec is **v2 (lightweight), approved to start** — four foundations locked, remaining decisions are explicit ask-before-implementing checkpoints. Backend only; frontend is built separately.
