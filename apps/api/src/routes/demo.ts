@@ -1,11 +1,13 @@
 import type { FastifyInstance } from 'fastify'
-import { createDemoRunSchema, ownerDecisionSchema } from '@zero-human/contracts'
+import { createDemoRunSchema, demoRunSnapshotSchema, ownerDecisionSchema } from '@zero-human/contracts'
 import { ApprovalDecision, ApprovalKind } from '@prisma/client'
 import { requireOwner } from '../auth.js'
+import { getConfig } from '../config.js'
 import { db } from '../db.js'
 import { collectProof, createDemoRun, decideCampaign, getDemoRunSnapshot, latestDemoRunId } from '../domain/demo-service.js'
 import { runFakeRehearsal } from '../domain/fake-run.js'
 import { verifyDemoRun } from '../domain/verify.js'
+import { httpError } from '../http-errors.js'
 import { reconcilePendingRenderTaskRuns, triggerRenderTask } from '../workflows/render-client.js'
 
 const approvedRenderTasks = [
@@ -16,7 +18,7 @@ const approvedRenderTasks = [
 
 async function reconciledSnapshot(demoRunId: string) {
   await reconcilePendingRenderTaskRuns(demoRunId)
-  return getDemoRunSnapshot(demoRunId)
+  return demoRunSnapshotSchema.parse(await getDemoRunSnapshot(demoRunId))
 }
 
 export function registerDemoRoutes(app: FastifyInstance): void {
@@ -41,6 +43,7 @@ export function registerDemoRoutes(app: FastifyInstance): void {
   })
 
   app.get<{ Params: { id: string } }>('/api/v1/demo-runs/:id/events', async (request, reply) => {
+    const initialSnapshot = await reconciledSnapshot(request.params.id)
     reply.hijack()
     reply.raw.writeHead(200, {
       'content-type': 'text/event-stream',
@@ -48,15 +51,18 @@ export function registerDemoRoutes(app: FastifyInstance): void {
       connection: 'keep-alive',
       'x-accel-buffering': 'no',
     })
+    const writeSnapshot = (snapshot: typeof initialSnapshot) => {
+      reply.raw.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`)
+    }
+    writeSnapshot(initialSnapshot)
     const send = async () => {
       try {
         const snapshot = await reconciledSnapshot(request.params.id)
-        reply.raw.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`)
+        writeSnapshot(snapshot)
       } catch {
         reply.raw.end()
       }
     }
-    await send()
     const interval = setInterval(() => void send(), 1_500)
     request.raw.on('close', () => clearInterval(interval))
   })
@@ -64,12 +70,12 @@ export function registerDemoRoutes(app: FastifyInstance): void {
   app.post('/api/v1/demo-runs', { preHandler: requireOwner }, async (request, reply) => {
     const input = createDemoRunSchema.parse(request.body ?? {})
     const id = await createDemoRun(input.mode)
-    return reply.code(201).send(await getDemoRunSnapshot(id))
+    return reply.code(201).send(demoRunSnapshotSchema.parse(await getDemoRunSnapshot(id)))
   })
 
   app.post<{ Params: { id: string } }>('/api/v1/demo-runs/:id/rehearse', { preHandler: requireOwner }, async (request) => {
     await runFakeRehearsal(request.params.id)
-    return getDemoRunSnapshot(request.params.id)
+    return demoRunSnapshotSchema.parse(await getDemoRunSnapshot(request.params.id))
   })
 
   app.post<{ Params: { id: string } }>('/api/v1/demo-runs/:id/campaign-decision', { preHandler: requireOwner }, async (request) => {
@@ -80,9 +86,11 @@ export function registerDemoRoutes(app: FastifyInstance): void {
       })
       if (!approval) await decideCampaign(request.params.id, input.decision)
       else if (approval.decision !== ApprovalDecision.APPROVE) {
-        throw new Error('Campaign was already rejected and cannot be approved on retry')
+        throw httpError(409, 'Campaign was already rejected and cannot be approved on retry')
       }
-      await Promise.all(approvedRenderTasks.map((slug) => triggerRenderTask(request.params.id, slug)))
+      if (getConfig().PROVIDER_MODE === 'real') {
+        await Promise.all(approvedRenderTasks.map((slug) => triggerRenderTask(request.params.id, slug)))
+      }
     } else {
       await decideCampaign(request.params.id, input.decision)
     }

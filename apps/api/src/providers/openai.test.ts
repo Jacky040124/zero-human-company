@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import { describe, expect, it, vi } from 'vitest'
+import { ProviderOutcomeUnknownError } from './types.js'
 import {
   OPENROUTER_BASE_URL,
   OPENROUTER_OUTREACH_MODEL,
@@ -83,5 +84,66 @@ describe('OpenRouter sales outreach', () => {
       OPENROUTER_OUTREACH_MODEL,
       'https://example.com/v1',
     )).toThrow(OPENROUTER_BASE_URL)
+  })
+
+  it('fails closed when the SDK cannot determine whether the paid request completed', async () => {
+    const fetchOpenRouter = vi.fn(async () => {
+      throw new TypeError('network timeout after request upload')
+    })
+    const client = new OpenAI({
+      apiKey: 'openrouter-secret',
+      baseURL: OPENROUTER_BASE_URL,
+      fetch: fetchOpenRouter as typeof fetch,
+      maxRetries: 0,
+    })
+    const provider = new OpenRouterSalesProvider(
+      'openrouter-secret',
+      OPENROUTER_OUTREACH_MODEL,
+      OPENROUTER_BASE_URL,
+      client,
+    )
+
+    await expect(provider.execute(request)).rejects.toMatchObject({
+      name: 'ProviderOutcomeUnknownError',
+      message: expect.stringContaining('automatic retry is disabled'),
+    })
+    expect(fetchOpenRouter).toHaveBeenCalledOnce()
+    expect(provider.capabilities().idempotency).toBe('manual')
+    expect(provider.reconcile).toBeUndefined()
+  })
+
+  it('fails closed with the accepted response ID when the paid response is malformed', async () => {
+    const fetchOpenRouter = vi.fn(async () => new Response(JSON.stringify({
+      id: 'gen-malformed-1',
+      object: 'chat.completion',
+      created: 1,
+      model: OPENROUTER_OUTREACH_MODEL,
+      choices: [{
+        index: 0,
+        finish_reason: 'stop',
+        logprobs: null,
+        message: { role: 'assistant', content: '{"subject":', refusal: null },
+      }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const client = new OpenAI({
+      apiKey: 'openrouter-secret',
+      baseURL: OPENROUTER_BASE_URL,
+      fetch: fetchOpenRouter as typeof fetch,
+      maxRetries: 0,
+    })
+    const provider = new OpenRouterSalesProvider(
+      'openrouter-secret',
+      OPENROUTER_OUTREACH_MODEL,
+      OPENROUTER_BASE_URL,
+      client,
+    )
+
+    const error = await provider.execute(request).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(ProviderOutcomeUnknownError)
+    expect(error).toMatchObject({ name: 'ProviderOutcomeUnknownError' })
+    expect(fetchOpenRouter).toHaveBeenCalledOnce()
+    expect(provider.reconcile).toBeUndefined()
   })
 })

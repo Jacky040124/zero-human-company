@@ -149,6 +149,7 @@ model DemoRun {
   id                String             @id @default(cuid())
   workspaceId       String
   campaignId        String
+  eventSequence     Int                @default(0)
   status            DemoRunStatus      @default(CREATED)
   mode              RunMode            @default(FAKE)
   startedAt         DateTime?
@@ -325,6 +326,7 @@ model RenderTaskIntent {
   externalId      String?                 @unique
   triggerStatus   RenderTaskTriggerStatus @default(PLANNED)
   triggerAttempts Int                     @default(0)
+  triggerToken    String?                 @unique
   lastError       String?
   leaseExpiresAt  DateTime?
   createdAt       DateTime                @default(now())
@@ -380,19 +382,22 @@ model Event {
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
 
   @@unique([opportunityId, sequence])
+  @@unique([demoRunId, sequence])
   @@index([demoRunId, occurredAt])
 }
 
 model ProviderEvent {
-  id              String    @id @default(cuid())
-  demoRunId       String
-  provider        Provider
-  externalEventId String
-  eventType       String
-  payloadHash     String
-  processedAt     DateTime?
-  receivedAt      DateTime  @default(now())
-  demoRun         DemoRun   @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+  id                  String    @id @default(cuid())
+  demoRunId           String
+  provider            Provider
+  externalEventId     String
+  eventType           String
+  payloadHash         String
+  processedAt         DateTime?
+  processingToken     String?
+  processingExpiresAt DateTime?
+  receivedAt          DateTime  @default(now())
+  demoRun             DemoRun   @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
 
   @@unique([provider, externalEventId])
 }

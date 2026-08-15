@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { DemoRunStatus, OpportunityStage, PilotStatus, Prisma, Provider } from '@prisma/client'
 import Stripe from 'stripe'
@@ -7,6 +7,7 @@ import { getConfig } from '../config.js'
 import { db } from '../db.js'
 import { appendRunEvent, getDemoRunSnapshot, recordOwnerSignature, transitionOpportunity } from '../domain/demo-service.js'
 import { evaluatePricePolicy } from '../domain/policy.js'
+import { httpError } from '../http-errors.js'
 import { dispatchProviderAction } from '../outbox.js'
 import { parseDocumensoWebhook } from '../providers/documenso/index.js'
 import { isExplicitAcceptance, parseMaasSeatPrice, verifyLinqWebhook } from '../providers/linq/index.js'
@@ -24,12 +25,73 @@ function header(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? '' : value ?? ''
 }
 
-export type ProviderReceiptClaim = 'NEW' | 'RESUME' | 'DONE'
+export type ProviderReceiptStatus = 'NEW' | 'RESUME' | 'DONE' | 'BUSY'
+
+export type ProviderReceiptClaim =
+  | { status: 'NEW' | 'RESUME'; receiptId: string; leaseToken: string }
+  | { status: 'DONE' }
+  | { status: 'BUSY' }
+
+type NegotiationProposalEvidence = {
+  action: {
+    demoRunId: string
+    provider: Provider
+    kind: string
+    idempotencyKey: string
+    status: string
+    live: boolean
+    providerExternalId: string | null
+  } | null
+  message: {
+    demoRunId: string
+    opportunityId: string
+    direction: string
+    live: boolean
+    externalId: string | null
+  } | null
+}
+
+export function isDurablyDeliveredNegotiationProposal(
+  evidence: NegotiationProposalEvidence,
+  expected: { demoRunId: string; opportunityId: string },
+): boolean {
+  const prefix = `linq-negotiation-proposal:${expected.demoRunId}:${expected.opportunityId}:`
+  return evidence.action?.demoRunId === expected.demoRunId
+    && evidence.action.provider === Provider.LINQ
+    && evidence.action.kind === 'message.send'
+    && evidence.action.idempotencyKey.startsWith(prefix)
+    && evidence.action.status === 'SUCCEEDED'
+    && evidence.action.live
+    && Boolean(evidence.action.providerExternalId)
+    && evidence.message?.demoRunId === expected.demoRunId
+    && evidence.message.opportunityId === expected.opportunityId
+    && evidence.message.direction === 'OUTBOUND'
+    && evidence.message.live
+    && evidence.message.externalId === evidence.action.providerExternalId
+}
+
+type ProviderEventInput = {
+  demoRunId: string
+  provider: Provider
+  externalEventId: string
+  eventType: string
+  raw: string
+}
+
+export function providerEventCreateData(input: ProviderEventInput) {
+  return {
+    demoRunId: input.demoRunId,
+    provider: input.provider,
+    externalEventId: input.externalEventId,
+    eventType: input.eventType,
+    payloadHash: payloadHash(input.raw),
+  }
+}
 
 export function classifyExistingProviderReceipt(
   existing: { payloadHash: string; demoRunId: string; eventType: string; processedAt: Date | null },
   incoming: { payloadHash: string; demoRunId: string; eventType: string },
-): Exclude<ProviderReceiptClaim, 'NEW'> {
+): 'RESUME' | 'DONE' {
   const payloadMatches = existing.payloadHash === incoming.payloadHash
   const targetMatches = existing.demoRunId === incoming.demoRunId && existing.eventType === incoming.eventType
   if (!payloadMatches || !targetMatches) {
@@ -40,35 +102,103 @@ export function classifyExistingProviderReceipt(
   return existing.processedAt ? 'DONE' : 'RESUME'
 }
 
-async function claimProviderEvent(input: {
+type ProviderReceiptRecord = {
+  id: string
+  payloadHash: string
   demoRunId: string
-  provider: Provider
-  externalEventId: string
   eventType: string
-  raw: string
-}): Promise<ProviderReceiptClaim> {
-  const hash = payloadHash(input.raw)
+  processedAt: Date | null
+}
+
+type ProviderReceiptStore = {
+  create(args: { data: Record<string, unknown> }): Promise<ProviderReceiptRecord>
+  findUniqueOrThrow(args: { where: Record<string, unknown> }): Promise<ProviderReceiptRecord>
+  findUnique(args: { where: Record<string, unknown> }): Promise<ProviderReceiptRecord | null>
+  updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>
+}
+
+type ProviderReceiptClaimOptions = {
+  store?: ProviderReceiptStore
+  now?: Date
+  leaseToken?: string
+}
+
+const providerReceiptStore = db.providerEvent as unknown as ProviderReceiptStore
+const PROVIDER_RECEIPT_LEASE_MS = 15 * 60 * 1_000
+
+function isUniqueViolation(error: unknown): boolean {
+  return (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+    || (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'P2002')
+}
+
+export async function claimProviderEvent(
+  input: ProviderEventInput,
+  options: ProviderReceiptClaimOptions = {},
+): Promise<ProviderReceiptClaim> {
+  const store = options.store ?? providerReceiptStore
+  const now = options.now ?? new Date()
+  const leaseToken = options.leaseToken ?? randomUUID()
+  const processingExpiresAt = new Date(now.getTime() + PROVIDER_RECEIPT_LEASE_MS)
+  const createData = providerEventCreateData(input)
   try {
-    await db.providerEvent.create({ data: { ...input, payloadHash: hash } })
-    return 'NEW'
+    const created = await store.create({ data: { ...createData, processingToken: leaseToken, processingExpiresAt } })
+    return { status: 'NEW', receiptId: created.id, leaseToken }
   } catch (error) {
-    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error
-    const existing = await db.providerEvent.findUniqueOrThrow({
+    if (!isUniqueViolation(error)) throw error
+    const existing = await store.findUniqueOrThrow({
       where: { provider_externalEventId: { provider: input.provider, externalEventId: input.externalEventId } },
     })
-    return classifyExistingProviderReceipt(existing, {
-      payloadHash: hash,
+    const status = classifyExistingProviderReceipt(existing, {
+      payloadHash: createData.payloadHash,
       demoRunId: input.demoRunId,
       eventType: input.eventType,
     })
+    if (status === 'DONE') return { status }
+    const claimed = await store.updateMany({
+      where: {
+        id: existing.id,
+        processedAt: null,
+        OR: [
+          { processingToken: null },
+          { processingExpiresAt: null },
+          { processingExpiresAt: { lte: now } },
+        ],
+      },
+      data: { processingToken: leaseToken, processingExpiresAt },
+    })
+    if (claimed.count === 1) return { status: 'RESUME', receiptId: existing.id, leaseToken }
+    const latest = await store.findUnique({ where: { id: existing.id } })
+    return latest?.processedAt ? { status: 'DONE' } : { status: 'BUSY' }
   }
 }
 
-async function markProviderEventProcessed(provider: Provider, externalEventId: string): Promise<void> {
-  await db.providerEvent.updateMany({
-    where: { provider, externalEventId, processedAt: null },
-    data: { processedAt: new Date() },
+async function markProviderEventProcessed(claim: Extract<ProviderReceiptClaim, { leaseToken: string }>): Promise<void> {
+  const updated = await db.providerEvent.updateMany({
+    where: { id: claim.receiptId, processedAt: null, processingToken: claim.leaseToken },
+    data: { processedAt: new Date(), processingToken: null, processingExpiresAt: null },
   })
+  if (updated.count !== 1) throw httpError(503, 'Provider event processing lease was lost before completion')
+}
+
+async function releaseProviderEventClaim(claim: Extract<ProviderReceiptClaim, { leaseToken: string }>): Promise<void> {
+  await db.providerEvent.updateMany({
+    where: { id: claim.receiptId, processedAt: null, processingToken: claim.leaseToken },
+    data: { processingToken: null, processingExpiresAt: null },
+  })
+}
+
+async function processProviderEventClaim<T>(
+  claim: Extract<ProviderReceiptClaim, { leaseToken: string }>,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    const result = await operation()
+    await markProviderEventProcessed(claim)
+    return result
+  } catch (error) {
+    await releaseProviderEventClaim(claim)
+    throw error
+  }
 }
 
 async function appendRunEventOnce(
@@ -81,7 +211,12 @@ async function appendRunEventOnce(
     })
     if (existing) return
   }
-  await appendRunEvent(demoRunId, event)
+  try {
+    await appendRunEvent(demoRunId, event)
+  } catch (error) {
+    if (event.proofRef && isUniqueViolation(error)) return
+    throw error
+  }
 }
 
 async function ensureRenderTask(
@@ -94,6 +229,27 @@ async function ensureRenderTask(
 async function currentOpportunityStage(opportunityId: string): Promise<OpportunityStage> {
   const opportunity = await db.opportunity.findUniqueOrThrow({ where: { id: opportunityId } })
   return opportunity.stage
+}
+
+async function negotiationProposalWasDelivered(demoRunId: string, opportunityId: string): Promise<boolean> {
+  const action = await db.providerAction.findFirst({
+    where: {
+      demoRunId,
+      provider: Provider.LINQ,
+      kind: 'message.send',
+      idempotencyKey: { startsWith: `linq-negotiation-proposal:${demoRunId}:${opportunityId}:` },
+      status: 'SUCCEEDED',
+      live: true,
+      providerExternalId: { not: null },
+    },
+    orderBy: { updatedAt: 'desc' },
+  })
+  const message = action?.providerExternalId
+    ? await db.message.findUnique({
+        where: { provider_externalId: { provider: Provider.LINQ, externalId: action.providerExternalId } },
+      })
+    : null
+  return isDurablyDeliveredNegotiationProposal({ action, message }, { demoRunId, opportunityId })
 }
 
 function requireStage(stage: OpportunityStage, allowed: readonly OpportunityStage[], context: string): void {
@@ -124,10 +280,10 @@ export function inboundMessageBody(input: { optedOut: boolean; companyName: stri
 }
 
 export function registerProviderRoutes(app: FastifyInstance): void {
-  app.post<{ Params: { id: string } }>('/api/v1/demo-runs/:id/activate', async (request) => {
+  app.post<{ Params: { id: string } }>('/api/v1/demo-runs/:id/activate', { preHandler: requireOwner }, async (request) => {
     const run = await db.demoRun.findUniqueOrThrow({ where: { id: request.params.id }, include: { workspace: { include: { pilotActivation: true } } } })
     const pilot = run.workspace.pilotActivation
-    if (!pilot || run.status !== DemoRunStatus.AWAITING_PAYMENT) throw new Error('Run is not awaiting pilot payment')
+    if (!pilot || run.status !== DemoRunStatus.AWAITING_PAYMENT) throw httpError(409, 'Run is not awaiting pilot payment')
     const action = await db.providerAction.upsert({
       where: { idempotencyKey: `stripe-checkout:${run.id}:${pilot.id}` },
       create: { demoRunId: run.id, provider: Provider.STRIPE, kind: 'checkout.session.create', idempotencyKey: `stripe-checkout:${run.id}:${pilot.id}`, request: { pilotActivationId: pilot.id } },
@@ -160,42 +316,45 @@ export function registerProviderRoutes(app: FastifyInstance): void {
       throw new Error('Stripe metadata does not match the run pilot activation')
     }
     const claim = await claimProviderEvent({ demoRunId, provider: Provider.STRIPE, externalEventId: proof.stripeEventId, eventType: signed.type, raw })
-    if (claim === 'DONE') return reply.code(200).send({ received: true, duplicate: true })
+    if (claim.status === 'DONE') return reply.code(200).send({ received: true, duplicate: true })
+    if (claim.status === 'BUSY') throw httpError(503, 'Stripe event is already being processed; retry later')
 
-    await db.payment.upsert({
-      where: { stripeEventId: proof.stripeEventId },
-      create: {
-        demoRunId,
-        pilotActivationId,
-        stripeEventId: proof.stripeEventId,
-        checkoutSessionId: proof.checkoutSessionId,
-        paymentIntentId: proof.paymentIntentId,
-        livemode: proof.livemode,
-        providerMode: proof.providerMode,
-        amount: proof.amount,
-        currency: proof.currency,
-        status: 'COMPLETED',
-      },
-      update: {},
+    const response = await processProviderEventClaim(claim, async () => {
+      await db.payment.upsert({
+        where: { stripeEventId: proof.stripeEventId },
+        create: {
+          demoRunId,
+          pilotActivationId,
+          stripeEventId: proof.stripeEventId,
+          checkoutSessionId: proof.checkoutSessionId,
+          paymentIntentId: proof.paymentIntentId,
+          livemode: proof.livemode,
+          providerMode: proof.providerMode,
+          amount: proof.amount,
+          currency: proof.currency,
+          status: 'COMPLETED',
+        },
+        update: {},
+      })
+      await db.pilotActivation.updateMany({
+        where: { id: pilotActivationId, workspaceId: run.workspaceId, status: PilotStatus.PENDING },
+        data: { status: PilotStatus.PAID, paidAt: new Date() },
+      })
+      await db.demoRun.updateMany({
+        where: { id: demoRunId, workspaceId: run.workspaceId, status: DemoRunStatus.AWAITING_PAYMENT },
+        data: { status: DemoRunStatus.STUDY_RUNNING },
+      })
+      await appendRunEventOnce(demoRunId, {
+        type: 'payment.completed',
+        status: 'PAID',
+        summary: `Signed Stripe ${proof.providerMode.toLowerCase()} webhook confirmed the $5 pilot activation.`,
+        actor: 'stripe',
+        proofRef: proof.stripeEventId,
+      })
+      await ensureRenderTask(demoRunId, 'run-terac-campaign-study')
+      return { received: true, resumed: claim.status === 'RESUME' }
     })
-    await db.pilotActivation.updateMany({
-      where: { id: pilotActivationId, workspaceId: run.workspaceId, status: PilotStatus.PENDING },
-      data: { status: PilotStatus.PAID, paidAt: new Date() },
-    })
-    await db.demoRun.updateMany({
-      where: { id: demoRunId, workspaceId: run.workspaceId, status: DemoRunStatus.AWAITING_PAYMENT },
-      data: { status: DemoRunStatus.STUDY_RUNNING },
-    })
-    await appendRunEventOnce(demoRunId, {
-      type: 'payment.completed',
-      status: 'PAID',
-      summary: `Signed Stripe ${proof.providerMode.toLowerCase()} webhook confirmed the $5 pilot activation.`,
-      actor: 'stripe',
-      proofRef: proof.stripeEventId,
-    })
-    await ensureRenderTask(demoRunId, 'run-terac-campaign-study')
-    await markProviderEventProcessed(Provider.STRIPE, proof.stripeEventId)
-    return reply.code(200).send({ received: true, resumed: claim === 'RESUME' })
+    return reply.code(200).send(response)
   })
 
   app.post('/webhooks/linq', { config: { rawBody: true } }, async (request, reply) => {
@@ -208,73 +367,88 @@ export function registerProviderRoutes(app: FastifyInstance): void {
     if (!event.chatId || !event.messageId || !event.text || !event.senderFingerprint) {
       return reply.code(202).send({ received: true, ignored: true })
     }
+    const chatId = event.chatId
+    const messageId = event.messageId
+    const text = event.text
+    const senderFingerprint = event.senderFingerprint
     const outbound = await db.message.findFirst({
-      where: { threadExternalId: event.chatId, direction: 'OUTBOUND' },
+      where: { threadExternalId: chatId, direction: 'OUTBOUND' },
       include: { opportunity: { include: { company: true, contact: true } } },
       orderBy: { occurredAt: 'desc' },
     })
     if (!outbound) return reply.code(202).send({ received: true, unmatched: true })
     const contact = outbound.opportunity.contact
-    if (!contact?.consented || !contact.rolePlayer || !contact.addressHash || contact.addressHash !== event.senderFingerprint) {
+    if (!contact?.consented || !contact.rolePlayer || !contact.addressHash || contact.addressHash !== senderFingerprint) {
       return reply.code(202).send({ received: true, unmatched: true })
     }
     const claim = await claimProviderEvent({ demoRunId: outbound.demoRunId, provider: Provider.LINQ, externalEventId: event.eventId, eventType: event.eventType, raw })
-    if (claim === 'DONE') return reply.code(200).send({ received: true, duplicate: true })
-    const companyName = outbound.opportunity.company.name
-    if (companyName !== 'Nordlicht Import GmbH' && companyName !== 'Maas Interiors BV') {
-      throw new Error('Linq reply matched an unsupported company')
-    }
-    await db.message.upsert({
-      where: { provider_externalId: { provider: Provider.LINQ, externalId: event.messageId } },
-      create: {
-        demoRunId: outbound.demoRunId,
-        opportunityId: outbound.opportunityId,
-        externalId: event.messageId,
-        threadExternalId: event.chatId,
-        direction: 'INBOUND',
-        status: 'RECEIVED',
-        sanitizedBody: inboundMessageBody({ optedOut: event.optedOut, companyName, text: event.text }),
-        rolePlayer: true,
-        live: outbound.live,
-      },
-      update: {},
-    })
-    let stage = await currentOpportunityStage(outbound.opportunityId)
-    if (event.optedOut) {
-      if (stage !== OpportunityStage.LOST) {
-        requireStage(stage, [OpportunityStage.OUTREACH, OpportunityStage.ENGAGED, OpportunityStage.NEGOTIATING, OpportunityStage.AGREEMENT, OpportunityStage.SIGNING], 'Linq opt-out')
-        await transitionOpportunity({ opportunityId: outbound.opportunityId, to: 'LOST', reason: 'OPT_OUT', eventType: 'contact.opted_out', summary: 'Role-player opted out; all outreach stopped.', actor: 'linq', proofRef: event.eventId })
+    if (claim.status === 'DONE') return reply.code(200).send({ received: true, duplicate: true })
+    if (claim.status === 'BUSY') throw httpError(503, 'Linq event is already being processed; retry later')
+    const response = await processProviderEventClaim(claim, async () => {
+      const companyName = outbound.opportunity.company.name
+      if (companyName !== 'Nordlicht Import GmbH' && companyName !== 'Maas Interiors BV') {
+        throw new Error('Linq reply matched an unsupported company')
       }
-    } else if (companyName === 'Maas Interiors BV') {
-      const offeredPrice = parseMaasSeatPrice(event.text)
-      if (offeredPrice !== null) {
-        const decision = evaluatePricePolicy({ offeredPrice, floorPrice: 158, currency: 'EUR', unit: 'seat' })
-        if (decision.outcome === 'PAUSE' && stage !== OpportunityStage.PAUSED) {
-          requireStage(stage, [OpportunityStage.OUTREACH], 'Maas price-policy reply')
-          await transitionOpportunity({ opportunityId: outbound.opportunityId, to: 'PAUSED', reason: decision.reason, eventType: 'policy.blocked', summary: `${decision.summary}; no reply was sent.`, actor: 'policy-engine', proofRef: event.eventId })
+      await db.message.upsert({
+        where: { provider_externalId: { provider: Provider.LINQ, externalId: messageId } },
+        create: {
+          demoRunId: outbound.demoRunId,
+          opportunityId: outbound.opportunityId,
+          externalId: messageId,
+          threadExternalId: chatId,
+          direction: 'INBOUND',
+          status: 'RECEIVED',
+          sanitizedBody: inboundMessageBody({ optedOut: event.optedOut, companyName, text }),
+          rolePlayer: true,
+          live: outbound.live,
+        },
+        update: {},
+      })
+      let stage = await currentOpportunityStage(outbound.opportunityId)
+      if (event.optedOut) {
+        if (stage !== OpportunityStage.LOST) {
+          requireStage(stage, [OpportunityStage.OUTREACH, OpportunityStage.ENGAGED, OpportunityStage.NEGOTIATING, OpportunityStage.AGREEMENT, OpportunityStage.SIGNING], 'Linq opt-out')
+          await transitionOpportunity({ opportunityId: outbound.opportunityId, to: 'LOST', reason: 'OPT_OUT', eventType: 'contact.opted_out', summary: 'Role-player opted out; all outreach stopped.', actor: 'linq', proofRef: event.eventId })
         }
+      } else if (companyName === 'Maas Interiors BV') {
+        const offeredPrice = parseMaasSeatPrice(text)
+        if (offeredPrice !== null) {
+          const decision = evaluatePricePolicy({ offeredPrice, floorPrice: 158, currency: 'EUR', unit: 'seat' })
+          if (decision.outcome === 'PAUSE' && stage !== OpportunityStage.PAUSED) {
+            requireStage(stage, [OpportunityStage.OUTREACH], 'Maas price-policy reply')
+            await transitionOpportunity({ opportunityId: outbound.opportunityId, to: 'PAUSED', reason: decision.reason, eventType: 'policy.blocked', summary: `${decision.summary}; no reply was sent.`, actor: 'policy-engine', proofRef: event.eventId })
+          }
+        }
+      } else if (stage === OpportunityStage.OUTREACH) {
+        await transitionOpportunity({ opportunityId: outbound.opportunityId, to: 'ENGAGED', eventType: 'reply.received', summary: 'The consenting Nordlicht role-player replied.', actor: 'linq', proofRef: event.eventId })
+        stage = OpportunityStage.ENGAGED
+      } else if (stage === OpportunityStage.NEGOTIATING && isExplicitAcceptance(text)) {
+        if (!await negotiationProposalWasDelivered(outbound.demoRunId, outbound.opportunityId)) {
+          throw httpError(503, 'Buyer acceptance arrived before proposal delivery was durably recorded; retry later')
+        }
+        await transitionOpportunity({ opportunityId: outbound.opportunityId, to: 'AGREEMENT', eventType: 'agreement.accepted', summary: 'The consenting Nordlicht role-player explicitly accepted.', actor: 'linq', proofRef: event.eventId })
+        stage = OpportunityStage.AGREEMENT
       }
-    } else if (stage === OpportunityStage.OUTREACH) {
-      await transitionOpportunity({ opportunityId: outbound.opportunityId, to: 'ENGAGED', eventType: 'reply.received', summary: 'The consenting Nordlicht role-player replied.', actor: 'linq', proofRef: event.eventId })
-      stage = OpportunityStage.ENGAGED
-    } else if (stage === OpportunityStage.NEGOTIATING && isExplicitAcceptance(event.text)) {
-      await transitionOpportunity({ opportunityId: outbound.opportunityId, to: 'AGREEMENT', eventType: 'agreement.accepted', summary: 'The consenting Nordlicht role-player explicitly accepted.', actor: 'linq', proofRef: event.eventId })
-      stage = OpportunityStage.AGREEMENT
-    }
-    if (!event.optedOut && companyName === 'Nordlicht Import GmbH' && stage === OpportunityStage.ENGAGED) {
-      await ensureRenderTask(outbound.demoRunId, 'run-band-negotiation')
-    }
-    if (!event.optedOut && companyName === 'Nordlicht Import GmbH' && stage === OpportunityStage.AGREEMENT && isExplicitAcceptance(event.text)) {
-      await ensureRenderTask(outbound.demoRunId, 'review-contract-and-create-envelope')
-    }
-    await markProviderEventProcessed(Provider.LINQ, event.eventId)
-    return reply.code(200).send({ received: true, resumed: claim === 'RESUME' })
+      if (!event.optedOut && companyName === 'Nordlicht Import GmbH' && stage === OpportunityStage.ENGAGED) {
+        await ensureRenderTask(outbound.demoRunId, 'run-band-negotiation')
+      }
+      if (!event.optedOut && companyName === 'Nordlicht Import GmbH' && stage === OpportunityStage.AGREEMENT && isExplicitAcceptance(text)) {
+        await ensureRenderTask(outbound.demoRunId, 'review-contract-and-create-envelope')
+      }
+      return { received: true, resumed: claim.status === 'RESUME' }
+    })
+    return reply.code(200).send(response)
   })
 
   app.post('/webhooks/documenso', async (request, reply) => {
     const config = getConfig()
     if (!config.DOCUMENSO_WEBHOOK_SECRET) throw new Error('Documenso webhook is not configured')
-    const event = parseDocumensoWebhook({ headers: request.headers, body: request.body }, config.DOCUMENSO_WEBHOOK_SECRET)
+    if (!config.DOCUMENSO_BUYER_EMAIL) throw new Error('Documenso buyer signer is not configured')
+    const event = parseDocumensoWebhook(
+      { headers: request.headers, body: request.body },
+      config.DOCUMENSO_WEBHOOK_SECRET,
+      { ownerEmail: config.OWNER_EMAIL, buyerEmail: config.DOCUMENSO_BUYER_EMAIL },
+    )
     if (!event) return reply.code(202).send({ received: true, ignored: true })
     const document = await db.document.findUniqueOrThrow({
       where: { provider_externalId: { provider: Provider.DOCUMENSO, externalId: event.documentId } },
@@ -283,12 +457,23 @@ export function registerProviderRoutes(app: FastifyInstance): void {
     if (document.opportunityId !== document.opportunity.id || document.demoRunId !== document.opportunity.demoRunId) {
       throw new Error('Documenso document does not match its stored run and opportunity')
     }
-    requireDocumensoExternalId(event.externalId, document.demoRunId, document.opportunityId)
+    if (event.externalId !== undefined) {
+      requireDocumensoExternalId(event.externalId, document.demoRunId, document.opportunityId)
+    }
     const raw = JSON.stringify(request.body)
-    const externalEventId = `${event.documentId}:${event.type}:${event.occurredAt}`
-    const claim = await claimProviderEvent({ demoRunId: document.demoRunId, provider: Provider.DOCUMENSO, externalEventId, eventType: event.type, raw })
-    if (claim === 'DONE') return reply.code(200).send({ received: true, duplicate: true })
-    if (event.type === 'OWNER_SIGNED') {
+    const receiptExternalEventId = `${event.documentId}:${event.sourceEventType}:${event.occurredAt}`
+    const effectProofRef = `${event.documentId}:${event.type}:${event.occurredAt}`
+    const claim = await claimProviderEvent({
+      demoRunId: document.demoRunId,
+      provider: Provider.DOCUMENSO,
+      externalEventId: receiptExternalEventId,
+      eventType: event.sourceEventType,
+      raw,
+    })
+    if (claim.status === 'DONE') return reply.code(200).send({ received: true, duplicate: true })
+    if (claim.status === 'BUSY') throw httpError(503, 'Documenso event is already being processed; retry later')
+    const response = await processProviderEventClaim(claim, async () => {
+      if (event.type === 'OWNER_SIGNED') {
       if (!document.ownerSignedAt) {
         requireStage(document.opportunity.stage, [OpportunityStage.SIGNING], 'Owner signature')
         if (document.demoRun.status !== DemoRunStatus.AWAITING_OWNER_SIGNATURE) {
@@ -300,10 +485,13 @@ export function registerProviderRoutes(app: FastifyInstance): void {
         where: { id: document.id, demoRunId: document.demoRunId, opportunityId: document.opportunityId, ownerSignedAt: null },
         data: { ownerSignedAt: new Date(event.occurredAt), status: 'OWNER_SIGNED' },
       })
-      await appendRunEventOnce(document.demoRunId, { opportunityId: document.opportunityId, type: 'owner.signed', status: 'SIGNING', summary: 'Owner action 2 completed in Documenso; awaiting the buyer role-player.', actor: 'owner-via-documenso', proofRef: externalEventId })
-    } else {
-      const current = await db.document.findUniqueOrThrow({ where: { id: document.id } })
-      if (!current.ownerSignedAt) throw new Error('Documenso completed before the required owner-first signature')
+      await appendRunEventOnce(document.demoRunId, { opportunityId: document.opportunityId, type: 'owner.signed', status: 'SIGNING', summary: 'Owner action 2 completed in Documenso; awaiting the buyer role-player.', actor: 'owner-via-documenso', proofRef: effectProofRef })
+      } else {
+        const current = await db.document.findUniqueOrThrow({ where: { id: document.id } })
+        if (!current.ownerSignedAt) throw new Error('Documenso completed before the required owner-first signature')
+        if (current.ownerSignedAt >= new Date(event.occurredAt)) {
+          throw new Error('Documenso completion does not follow the stored owner signature')
+        }
       const stage = await currentOpportunityStage(document.opportunityId)
       requireStage(stage, [OpportunityStage.SIGNING, OpportunityStage.SIGNED], 'Document completion')
       if (document.demoRun.status !== DemoRunStatus.AWAITING_OWNER_SIGNATURE && document.demoRun.status !== DemoRunStatus.COMPLETE) {
@@ -314,20 +502,21 @@ export function registerProviderRoutes(app: FastifyInstance): void {
         data: { buyerSignedAt: new Date(event.occurredAt), completedAt: new Date(event.occurredAt), status: 'COMPLETED' },
       })
       if (stage !== OpportunityStage.SIGNED) {
-        await transitionOpportunity({ opportunityId: document.opportunityId, to: 'SIGNED', eventType: 'document.completed', summary: 'Buyer role-player signed second; Documenso marked the agreement complete.', actor: 'documenso', proofRef: externalEventId })
+        await transitionOpportunity({ opportunityId: document.opportunityId, to: 'SIGNED', eventType: 'document.completed', summary: 'Buyer role-player signed second; Documenso marked the agreement complete.', actor: 'documenso', proofRef: effectProofRef })
       }
       await db.demoRun.updateMany({
         where: { id: document.demoRunId, status: { in: [DemoRunStatus.AWAITING_OWNER_SIGNATURE, DemoRunStatus.COMPLETE] } },
         data: { status: DemoRunStatus.COMPLETE, completedAt: new Date(event.occurredAt) },
       })
-    }
-    await markProviderEventProcessed(Provider.DOCUMENSO, externalEventId)
-    return reply.code(200).send({ received: true, resumed: claim === 'RESUME' })
+      }
+      return { received: true, resumed: claim.status === 'RESUME' }
+    })
+    return reply.code(200).send(response)
   })
 
   app.post<{ Params: { id: string; slug: string } }>('/api/v1/demo-runs/:id/tasks/:slug', { preHandler: requireOwner }, async (request) => {
     const allowed = ['run-terac-campaign-study', 'discover-research-leads', 'send-nordlicht-outreach', 'run-band-negotiation', 'review-contract-and-create-envelope', 'prove-render-retry'] as const
-    if (!allowed.includes(request.params.slug as typeof allowed[number])) throw new Error('Unknown workflow task')
+    if (!allowed.includes(request.params.slug as typeof allowed[number])) throw httpError(400, 'Unknown workflow task')
     const taskRunId = await triggerRenderTask(request.params.id, request.params.slug as typeof allowed[number])
     return { taskRunId, snapshot: await getDemoRunSnapshot(request.params.id) }
   })

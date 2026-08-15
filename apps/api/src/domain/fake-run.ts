@@ -9,6 +9,19 @@ import {
   transitionOpportunity,
 } from './demo-service.js'
 
+export function fakeDocumentEvidenceTimestamps(): {
+  ownerSignedAt: Date
+  buyerSignedAt: Date
+  completedAt: Date
+} {
+  const baseMs = Date.parse('2026-08-15T12:00:00.000Z')
+  return {
+    ownerSignedAt: new Date(baseMs),
+    buyerSignedAt: new Date(baseMs + 1_000),
+    completedAt: new Date(baseMs + 1_000),
+  }
+}
+
 export async function runFakeRehearsal(existingRunId?: string): Promise<string> {
   const demoRunId = existingRunId ?? await createDemoRun('FAKE')
   const run = await db.demoRun.findUniqueOrThrow({
@@ -71,13 +84,34 @@ export async function runFakeRehearsal(existingRunId?: string): Promise<string> 
   await db.message.create({ data: { demoRunId, opportunityId: nordlicht.id, externalId: `linq_out_fake_${demoRunId}`, direction: 'OUTBOUND', status: 'DELIVERED', sanitizedBody: 'Pilot outreach delivered to consenting role-player.', rolePlayer: true } })
   await transitionOpportunity({ opportunityId: nordlicht.id, to: 'ENGAGED', eventType: 'reply.received', summary: 'Consenting Nordlicht role-player replied with buying requirements.', actor: 'fake-linq', proofRef: `linq_in_fake_${demoRunId}` })
   await db.message.create({ data: { demoRunId, opportunityId: nordlicht.id, externalId: `linq_in_fake_${demoRunId}`, direction: 'INBOUND', status: 'RECEIVED', sanitizedBody: 'Role-player requested two containers and German law.', rolePlayer: true } })
-  await db.agentHandoff.create({ data: { demoRunId, roomId: `band_fake_${demoRunId}`, live: false, status: 'COMPLETE', verdict: { recommendation: 'PROCEED', proposedPrice: 172, risks: ['German law review'], rationale: 'Within policy after specialist review', agentVotes: { researcher: 'PROCEED', negotiator: 'PROCEED', policyReviewer: 'PROCEED' } } } })
-  await transitionOpportunity({ opportunityId: nordlicht.id, to: 'NEGOTIATING', eventType: 'band.verdict', summary: 'Three Band agents returned a schema-valid PROCEED verdict.', actor: 'fake-band', proofRef: `band_fake_${demoRunId}` })
-  await transitionOpportunity({ opportunityId: nordlicht.id, to: 'AGREEMENT', eventType: 'agreement.reached', summary: 'Role-player accepted the in-policy terms.', actor: 'negotiator' })
+  await db.agentHandoff.create({
+    data: {
+      demoRunId,
+      roomId: `band_fake_${demoRunId}`,
+      live: false,
+      status: 'COMPLETE',
+      verdict: {
+        recommendation: 'ACCEPT',
+        proposedPrice: 172,
+        risks: ['German law review'],
+        rationale: 'Within policy after specialist review',
+        agentVotes: [
+          { agentId: 'fake-researcher', vote: 'ACCEPT', rationale: 'Evidence supports the terms.' },
+          { agentId: 'fake-negotiator', vote: 'ACCEPT', rationale: 'The proposal matches the brief.' },
+          { agentId: 'fake-policy-reviewer', vote: 'ACCEPT', rationale: 'EUR 172 is above the EUR 158 floor.' },
+        ],
+      },
+    },
+  })
+  await transitionOpportunity({ opportunityId: nordlicht.id, to: 'NEGOTIATING', eventType: 'band.verdict', summary: 'Three Band agents returned a schema-valid ACCEPT verdict.', actor: 'fake-band', proofRef: `band_fake_${demoRunId}` })
+  await db.message.create({ data: { demoRunId, opportunityId: nordlicht.id, externalId: `linq_proposal_fake_${demoRunId}`, direction: 'OUTBOUND', status: 'DELIVERED', sanitizedBody: 'In-policy proposal delivered to the consenting role-player.', rolePlayer: true } })
+  await appendRunEvent(demoRunId, { opportunityId: nordlicht.id, type: 'proposal.sent', status: 'NEGOTIATING', summary: 'The in-policy proposal was delivered through the fake Linq rehearsal.', actor: 'fake-linq', proofRef: `linq_proposal_fake_${demoRunId}` })
+  await db.message.create({ data: { demoRunId, opportunityId: nordlicht.id, externalId: `linq_accept_fake_${demoRunId}`, direction: 'INBOUND', status: 'RECEIVED', sanitizedBody: 'The consenting role-player explicitly accepted the proposal.', rolePlayer: true } })
+  await transitionOpportunity({ opportunityId: nordlicht.id, to: 'AGREEMENT', eventType: 'agreement.accepted', summary: 'The consenting role-player explicitly accepted in a later Linq message.', actor: 'fake-linq', proofRef: `linq_accept_fake_${demoRunId}` })
   await transitionOpportunity({ opportunityId: nordlicht.id, to: 'SIGNING', eventType: 'document.created', summary: 'Sequential Documenso envelope prepared: owner first, buyer second.', actor: 'fake-documenso', proofRef: `doc_fake_${demoRunId}` })
   await db.demoRun.update({ where: { id: demoRunId }, data: { status: DemoRunStatus.AWAITING_OWNER_SIGNATURE } })
   await recordOwnerSignature(demoRunId)
-  await db.document.create({ data: { demoRunId, opportunityId: nordlicht.id, externalId: `doc_fake_${demoRunId}`, live: false, status: 'COMPLETED', ownerSignedAt: new Date(), buyerSignedAt: new Date(), completedAt: new Date() } })
+  await db.document.create({ data: { demoRunId, opportunityId: nordlicht.id, externalId: `doc_fake_${demoRunId}`, live: false, status: 'COMPLETED', ...fakeDocumentEvidenceTimestamps() } })
   await transitionOpportunity({ opportunityId: nordlicht.id, to: 'SIGNED', eventType: 'document.completed', summary: 'Owner and buyer role-player signatures completed in order.', actor: 'fake-documenso', proofRef: `doc_fake_${demoRunId}` })
 
   await applyMaasPolicyBranch(demoRunId)

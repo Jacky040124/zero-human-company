@@ -4,10 +4,8 @@ import { Codex, type CodexOptions, type ThreadOptions } from '@openai/codex-sdk'
 import { access, chmod, copyFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import OpenAI from 'openai'
 
 export const CODEX_BAND_AGENT_MODEL = 'gpt-5.6-sol'
-export const RESPONSES_BAND_AGENT_MODEL = 'gpt-5.6-luna'
 export const DEFAULT_CODEX_THREAD_STATE_PATH = join(tmpdir(), 'zero-human-company', 'band-codex-threads.json')
 export const DEFAULT_CODEX_WORKING_DIRECTORY = join(tmpdir(), 'zero-human-company', 'codex-workdir')
 export const DEFAULT_CODEX_RUNTIME_HOME = join(tmpdir(), 'zero-human-company', 'codex-runtime')
@@ -21,9 +19,7 @@ export type BandAgentIdentity = {
 }
 
 export type BandAgentsConfig = {
-  openAIApiKey?: string
-  brain: 'CODEX' | 'RESPONSES'
-  allowResponsesFallback: boolean
+  brain: 'CODEX'
   codexThreadStatePath: string
   codexWorkingDirectory: string
   codexRuntimeHome: string
@@ -33,8 +29,8 @@ export type BandAgentsConfig = {
 }
 
 export type BrainProof = {
-  runtime: 'CODEX' | 'RESPONSES'
-  model: typeof CODEX_BAND_AGENT_MODEL | typeof RESPONSES_BAND_AGENT_MODEL
+  runtime: 'CODEX'
+  model: typeof CODEX_BAND_AGENT_MODEL
 }
 
 export type BrainResult = BrainProof & { text: string }
@@ -88,8 +84,8 @@ export function redactSensitiveText(value: string): string {
   return value
     .replace(/("(?:api[_ -]?key|token|secret|password)"\s*:\s*")[^"]*(")/gi, '$1[REDACTED_SECRET]$2')
     .replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [REDACTED_SECRET]')
-    .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, '[REDACTED_SECRET]')
-    .replace(/\b(api[_ -]?key|token|secret)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED_SECRET]')
+    .replace(/\b(?:sk|rk|pk|whsec)[_-][A-Za-z0-9_-]{8,}\b/g, '[REDACTED_SECRET]')
+    .replace(/\b(api[_ -]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED_SECRET]')
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]')
     .replace(/(?<!\w)(?:\+?\d[\d ().-]{7,}\d)(?!\w)/g, '[REDACTED_PHONE]')
 }
@@ -188,21 +184,6 @@ export function createRoleHandler(
       ? formatPolicyResponse(redactSensitiveText(result.text), { runtime: result.runtime, model: result.model })
       : `[ZHC_BRAIN runtime=${result.runtime} model=${result.model}] ${redactSensitiveText(result.text.trim())}`
     await tools.sendMessage(content, mentions)
-  }
-}
-
-export function createOpenAIBrain(client: OpenAI): RoleBrain {
-  return async ({ instructions, message }) => {
-    const response = await client.responses.create({
-      model: RESPONSES_BAND_AGENT_MODEL,
-      reasoning: { effort: 'medium' },
-      input: [
-        { role: 'system', content: instructions },
-        { role: 'user', content: message },
-      ],
-    })
-    if (!response.output_text.trim()) throw new Error('OpenAI Responses API returned no text')
-    return { text: response.output_text, runtime: 'RESPONSES', model: RESPONSES_BAND_AGENT_MODEL }
   }
 }
 
@@ -331,8 +312,6 @@ export type CodexBrainOptions = {
   state: CodexThreadState
   workingDirectory?: string
   prepareWorkingDirectory?: (path: string) => Promise<void>
-  allowResponsesFallback?: boolean
-  responsesFallback?: RoleBrain
 }
 
 export async function createCodexBrain(options: CodexBrainOptions): Promise<RoleBrain> {
@@ -381,29 +360,18 @@ export async function createCodexBrain(options: CodexBrainOptions): Promise<Role
       return { text: turn.finalResponse, runtime: 'CODEX', model: CODEX_BAND_AGENT_MODEL }
     } catch {
       await persistThreadId(key, thread)
-      if (!options.allowResponsesFallback || !options.responsesFallback) throw new Error('Codex brain turn failed')
-      return options.responsesFallback(input)
+      throw new Error('Codex brain turn failed')
     }
     })
   }
 }
 
 export async function createConfiguredBrain(config: BandAgentsConfig): Promise<RoleBrain> {
-  const needsResponses = config.brain === 'RESPONSES' || config.allowResponsesFallback
-  const responsesBrain = needsResponses && config.openAIApiKey
-    ? createOpenAIBrain(new OpenAI({ apiKey: config.openAIApiKey }))
-    : undefined
-  if (config.brain === 'RESPONSES') {
-    if (!responsesBrain) throw new Error('OPENAI_API_KEY is required for the Responses brain')
-    return responsesBrain
-  }
   await prepareCodexRuntimeHome(config.codexRuntimeHome)
   return createCodexBrain({
     client: createPlanAuthenticatedCodex(process.env, undefined, config.codexRuntimeHome),
     state: new FileCodexThreadState(config.codexThreadStatePath),
     workingDirectory: config.codexWorkingDirectory,
-    allowResponsesFallback: config.allowResponsesFallback,
-    responsesFallback: responsesBrain,
   })
 }
 
@@ -436,31 +404,16 @@ function requiredEnv(env: NodeJS.ProcessEnv, name: string): string {
 
 function brainFromEnv(value: string | undefined): BandAgentsConfig['brain'] {
   const normalized = value?.trim().toUpperCase() || 'CODEX'
-  if (normalized !== 'CODEX' && normalized !== 'RESPONSES') {
-    throw new Error('BAND_AGENT_BRAIN must be CODEX or RESPONSES')
+  if (normalized !== 'CODEX') {
+    throw new Error('BAND_AGENT_BRAIN must be CODEX; API-backed Band brains are disabled')
   }
-  return normalized
-}
-
-function booleanFromEnv(value: string | undefined, name: string): boolean {
-  const normalized = value?.trim().toLowerCase()
-  if (!normalized) return false
-  if (normalized === 'true') return true
-  if (normalized === 'false') return false
-  throw new Error(`${name} must be true or false`)
+  return 'CODEX'
 }
 
 export function loadBandAgentsConfig(env: NodeJS.ProcessEnv = process.env): BandAgentsConfig {
   const brain = brainFromEnv(env.BAND_AGENT_BRAIN)
-  const allowResponsesFallback = booleanFromEnv(env.BAND_AGENT_ALLOW_RESPONSES_FALLBACK, 'BAND_AGENT_ALLOW_RESPONSES_FALLBACK')
-  const openAIApiKey = env.OPENAI_API_KEY?.trim()
-  if ((brain === 'RESPONSES' || allowResponsesFallback) && !openAIApiKey) {
-    throw new Error('OPENAI_API_KEY is required for the selected Responses brain or fallback')
-  }
   return {
-    ...(openAIApiKey ? { openAIApiKey } : {}),
     brain,
-    allowResponsesFallback,
     codexThreadStatePath: env.BAND_CODEX_THREAD_STATE_PATH?.trim() || DEFAULT_CODEX_THREAD_STATE_PATH,
     codexWorkingDirectory: env.BAND_CODEX_WORKING_DIRECTORY?.trim() || DEFAULT_CODEX_WORKING_DIRECTORY,
     codexRuntimeHome: env.BAND_CODEX_RUNTIME_HOME?.trim() || DEFAULT_CODEX_RUNTIME_HOME,

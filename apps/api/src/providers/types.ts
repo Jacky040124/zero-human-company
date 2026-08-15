@@ -2,7 +2,7 @@ import type { Provider } from '@zero-human/contracts'
 
 export type ProviderCapabilities = {
   live: boolean
-  idempotency: 'native' | 'reconcile'
+  idempotency: 'native' | 'reconcile' | 'manual'
   operations: readonly string[]
 }
 

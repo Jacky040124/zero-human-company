@@ -17,7 +17,7 @@
     "dev:api": "npm run dev -w @zero-human/api",
     "build": "npm run build -w @zero-human/contracts && tsc -b && vite build && npm run build -w @zero-human/api",
     "start": "npm run start -w @zero-human/api",
-    "check": "npm run check -w @zero-human/contracts && tsc -b && npm run check -w @zero-human/api && npm test",
+    "check": "npm run build -w @zero-human/contracts && tsc -b && npm run check -w @zero-human/api && npm test",
     "test": "vitest run",
     "db:generate": "npm run db:generate -w @zero-human/api",
     "db:migrate": "npm run db:migrate -w @zero-human/api",

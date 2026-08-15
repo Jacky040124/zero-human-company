@@ -12,9 +12,11 @@ import {
   RunMode,
 } from '@prisma/client'
 import { db } from '../db.js'
+import { httpError } from '../http-errors.js'
 import { getConfig } from '../config.js'
 import { assertTransition } from './state-machine.js'
 import { evaluatePricePolicy } from './policy.js'
+import { sanitizeEventSummary } from './sanitize.js'
 
 const campaignContent = {
   baseline: {
@@ -134,17 +136,20 @@ export async function appendRunEvent(
     if (event.opportunityId) {
       const opportunity = await tx.opportunity.findUniqueOrThrow({ where: { id: event.opportunityId } })
       if (opportunity.demoRunId !== demoRunId) throw new Error('Event opportunity does not belong to the demo run')
-      const nextSequence = opportunity.sequence + 1
+      const nextOpportunitySequence = opportunity.sequence + 1
       const updated = await tx.opportunity.updateMany({
         where: { id: opportunity.id, version: opportunity.version },
-        data: { sequence: nextSequence, version: { increment: 1 } },
+        data: { sequence: nextOpportunitySequence, version: { increment: 1 } },
       })
       if (updated.count !== 1) throw new Error('Opportunity changed concurrently; retry from fresh state')
-      await tx.event.create({ data: { ...event, demoRunId, sequence: nextSequence } })
+      await tx.event.create({
+        data: { ...event, summary: sanitizeEventSummary(event.summary), demoRunId, sequence: 0 },
+      })
       return
     }
-    const count = await tx.event.count({ where: { demoRunId } })
-    await tx.event.create({ data: { ...event, demoRunId, sequence: count + 1 } })
+    await tx.event.create({
+      data: { ...event, summary: sanitizeEventSummary(event.summary), demoRunId, sequence: 0 },
+    })
   })
 }
 
@@ -161,14 +166,14 @@ export async function transitionOpportunity(input: {
   await db.$transaction(async (tx) => {
     const current = await tx.opportunity.findUniqueOrThrow({ where: { id: input.opportunityId } })
     assertTransition(current.stage as OpportunityStage, input.to)
-    const nextSequence = current.sequence + 1
+    const nextOpportunitySequence = current.sequence + 1
     const updated = await tx.opportunity.updateMany({
       where: { id: current.id, version: current.version },
       data: {
         stage: input.to as DbOpportunityStage,
         stageReason: input.reason,
         version: { increment: 1 },
-        sequence: nextSequence,
+        sequence: nextOpportunitySequence,
       },
     })
     if (updated.count !== 1) throw new Error('Opportunity changed concurrently; retry from fresh state')
@@ -176,10 +181,10 @@ export async function transitionOpportunity(input: {
       data: {
         demoRunId: current.demoRunId,
         opportunityId: current.id,
-        sequence: nextSequence,
+        sequence: 0,
         type: input.eventType,
         status: input.to,
-        summary: input.summary,
+        summary: sanitizeEventSummary(input.summary),
         actor: input.actor,
         proofRef: input.proofRef,
       },
@@ -208,11 +213,11 @@ export async function decideCampaign(
       include: { workspace: { include: { pilotActivation: true } }, humanStudies: true },
     })
     if (run.status !== DemoRunStatus.AWAITING_CAMPAIGN_APPROVAL) {
-      throw new Error('Campaign is not awaiting owner approval')
+      throw httpError(409, 'Campaign is not awaiting owner approval')
     }
-    if (run.workspace.pilotActivation?.status !== PilotStatus.PAID) throw new Error('Pilot is not paid')
+    if (run.workspace.pilotActivation?.status !== PilotStatus.PAID) throw httpError(409, 'Pilot is not paid')
     const study = run.humanStudies.find((item) => item.status === 'COMPLETE')
-    if (!study) throw new Error('Terac study has not completed')
+    if (!study) throw httpError(409, 'Terac study has not completed')
     await tx.approval.create({
       data: {
         demoRunId,
@@ -318,7 +323,13 @@ export async function collectProof(demoRunId: string): Promise<ProofItem[]> {
       ...(detail ? { detail } : {}),
     })
   }
-  return items.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
+  return items.map((item) => ({
+    ...item,
+    kind: sanitizeEventSummary(item.kind, 120),
+    externalId: sanitizeEventSummary(item.externalId, 240),
+    status: sanitizeEventSummary(item.status, 80),
+    ...(item.detail ? { detail: sanitizeEventSummary(item.detail, 240) } : {}),
+  })).sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
 }
 
 export async function getDemoRunSnapshot(demoRunId: string): Promise<DemoRunSnapshot> {
@@ -327,7 +338,7 @@ export async function getDemoRunSnapshot(demoRunId: string): Promise<DemoRunSnap
     include: {
       workspace: { include: { pilotActivation: true } },
       opportunities: { include: { company: true, contact: true }, orderBy: { createdAt: 'asc' } },
-      events: { orderBy: { occurredAt: 'desc' }, take: 100 },
+      events: { orderBy: { sequence: 'desc' }, take: 100 },
       approvals: true,
     },
   })
@@ -349,8 +360,10 @@ export async function getDemoRunSnapshot(demoRunId: string): Promise<DemoRunSnap
       id: item.id,
       company: item.company.name,
       contactName: item.contact?.name ?? 'Research only',
+      city: item.company.city,
       country: item.company.country,
       focus: item.company.focus,
+      researchOnly: item.company.researchOnly,
       stage: item.stage,
       stageReason: item.stageReason,
       updatedAt: item.updatedAt.toISOString(),
@@ -359,7 +372,7 @@ export async function getDemoRunSnapshot(demoRunId: string): Promise<DemoRunSnap
       sequence: item.sequence,
       type: item.type,
       status: item.status,
-      summary: item.summary,
+      summary: sanitizeEventSummary(item.summary),
       actor: item.actor,
       occurredAt: item.occurredAt.toISOString(),
       proofRef: item.proofRef,

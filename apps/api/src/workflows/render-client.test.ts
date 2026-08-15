@@ -44,6 +44,7 @@ const plannedIntent = {
   externalId: null,
   triggerStatus: 'PLANNED',
   triggerAttempts: 0,
+  triggerToken: null,
   lastError: null,
   leaseExpiresAt: null,
   createdAt: new Date('2026-08-15T00:00:00Z'),
@@ -98,18 +99,55 @@ describe('durable Render task intent', () => {
     }))
   })
 
-  it('persists a trigger failure so a later call can retry', async () => {
+  it('persists a trigger failure with a retry delay so a later expired call can retry', async () => {
     mocks.workflows.startTask.mockRejectedValueOnce(new Error('Render unavailable'))
 
     await expect(triggerRenderTask('demo-1', 'discover-research-leads')).rejects.toThrow('Render unavailable')
-    expect(mocks.db.renderTaskIntent.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ triggerStatus: 'FAILED', lastError: 'Render unavailable' }),
+    expect(mocks.db.renderTaskIntent.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'intent-1', triggerToken: expect.any(String) }),
+      data: expect.objectContaining({
+        triggerStatus: 'FAILED',
+        triggerToken: null,
+        lastError: 'Render unavailable',
+        leaseExpiresAt: expect.any(Date),
+      }),
     }))
 
-    mocks.db.renderTaskIntent.upsert.mockResolvedValue({ ...plannedIntent, triggerStatus: 'FAILED', lastError: 'Render unavailable' })
+    mocks.db.renderTaskIntent.upsert.mockResolvedValue({
+      ...plannedIntent,
+      triggerStatus: 'FAILED',
+      lastError: 'Render unavailable',
+      leaseExpiresAt: new Date('2026-08-14T00:00:00Z'),
+    })
     mocks.workflows.startTask.mockResolvedValueOnce({ taskRunId: 'render-retry' })
     await expect(triggerRenderTask('demo-1', 'discover-research-leads')).resolves.toBe('render-retry')
     expect(mocks.workflows.startTask).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not let a stale claim overwrite the winning provider run', async () => {
+    let staleToken: string | undefined
+    mocks.db.renderTaskIntent.updateMany.mockImplementation(async (args) => {
+      if (args.data.triggerStatus === 'TRIGGERING') {
+        staleToken = args.data.triggerToken
+        return { count: 1 }
+      }
+      if (args.data.externalId === 'render-run-1') return { count: 0 }
+      return { count: 1 }
+    })
+    mocks.db.renderTaskIntent.findUniqueOrThrow.mockResolvedValue({
+      ...plannedIntent,
+      externalId: 'render-winner',
+      triggerStatus: 'TRIGGERED',
+    })
+
+    await expect(triggerRenderTask('demo-1', 'discover-research-leads')).resolves.toBe('render-winner')
+
+    expect(mocks.workflows.startTask).toHaveBeenCalledTimes(1)
+    expect(mocks.db.renderTaskIntent.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'intent-1', triggerToken: staleToken, externalId: null },
+      data: expect.objectContaining({ externalId: 'render-run-1' }),
+    }))
+    expect(mocks.db.workflowRun.upsert).not.toHaveBeenCalled()
   })
 
   it('recovers an accepted provider run after an uncertain trigger outcome', async () => {

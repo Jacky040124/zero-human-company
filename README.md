@@ -21,6 +21,7 @@ Start PostgreSQL, migrate, and run one deterministic rehearsal:
 cp .env.example .env.local
 docker compose up -d postgres
 npm install
+npm run db:generate
 npm run db:migrate
 npm run demo:run
 npm run dev
@@ -35,6 +36,6 @@ Open `/app/dashboard`. When the API is available, the interface switches from it
 
 ## Status
 
-- API-backed run state, owner gates, signed webhooks, provider ports, transactional outbox, proof ledger, and strict same-run verification are implemented.
+- API-backed run state, owner gates, signed webhooks, provider ports, transactional outbox, proof ledger, strict same-run verification, and a schema-documented OpenAPI seam are implemented.
 - Local rehearsal is deterministic. Judge mode rejects fake providers and requires real provider configuration.
-- Render creates the web service, Postgres, and a single-instance worker hosting three external Band identities backed by Codex/GPT-5.6 Sol. The Workflow service is created once in the Render dashboard because Workflows are not currently supported by Blueprints.
+- `render.yaml` defines the web service, Postgres, and a single-instance worker hosting three external Band identities backed by Codex/GPT-5.6 Sol. The Workflow service is created separately because Workflows are not currently supported by Blueprints.

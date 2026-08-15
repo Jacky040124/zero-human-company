@@ -3,6 +3,7 @@ services:
     name: zero-human-company
     runtime: node
     region: oregon
+    plan: starter
     buildCommand: npm ci --include=dev && npm run db:generate && npm run build
     preDeployCommand: npm run db:migrate
     startCommand: npm start
@@ -66,8 +67,6 @@ services:
         value: wss://app.band.ai/api/v1/socket/websocket
       - key: BAND_AGENT_BRAIN
         value: CODEX
-      - key: BAND_AGENT_ALLOW_RESPONSES_FALLBACK
-        value: "false"
       - key: BAND_RESEARCHER_AGENT_ID
         sync: false
       - key: BAND_RESEARCHER_API_KEY
@@ -115,7 +114,6 @@ services:
     numInstances: 1
     dockerfilePath: ./apps/api/Dockerfile.band-agents
     dockerContext: .
-    maxShutdownDelaySeconds: 60
     disk:
       name: band-codex-state
       mountPath: /var/data
@@ -125,8 +123,6 @@ services:
         value: production
       - key: BAND_AGENT_BRAIN
         value: CODEX
-      - key: BAND_AGENT_ALLOW_RESPONSES_FALLBACK
-        value: "false"
       - key: CODEX_HOME
         value: /var/data/codex
       - key: BAND_CODEX_RUNTIME_HOME
@@ -155,5 +151,7 @@ services:
 databases:
   - name: zero-human-company-db
     region: oregon
+    plan: basic-256mb
+    postgresMajorVersion: "16"
     databaseName: zero_human_company
     user: zero_human_company

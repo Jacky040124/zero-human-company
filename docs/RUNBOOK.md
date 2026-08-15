@@ -6,13 +6,13 @@ The judged artifact is one persisted `DemoRun`. Never combine proof from rehears
 
 1. Copy `.env.example` to `.env.local`. Keep real keys out of Git and chat; local API, CLI, Workflow, Prisma, and Band worker commands load this exact root file.
 2. Start PostgreSQL with `docker compose up -d postgres`.
-3. Run `npm install`, `npm run db:migrate`, then `npm run demo:run`.
+3. Run `npm install`, `npm run db:generate`, `npm run db:migrate`, then `npm run demo:run`.
 4. Run `npm run dev` and open `/app/dashboard`.
 5. Repeat the rehearsal three times from fresh runs. Fake proof is amber and cannot pass judge verification.
 
 ## Render setup
 
-`render.yaml` creates the same-origin web service, PostgreSQL, and one single-instance background worker for the three external Band agents. Render Workflows currently requires one dashboard setup step:
+`render.yaml` defines the same-origin web service, PostgreSQL, and one single-instance background worker for the three external Band agents. Do not create or sync missing resources before the backend integration breakpoint is approved. Render Workflows is not represented by the Blueprint, so create it separately afterward through Render's dashboard or API:
 
 1. Create a TypeScript Workflow service from this repository.
 2. Build with `npm ci --include=dev && npm run db:generate && npm run build`.
@@ -45,7 +45,7 @@ CODEX_HOME=/var/data/codex /app/node_modules/.bin/codex login --device-auth
 CODEX_HOME=/var/data/codex /app/node_modules/.bin/codex login status
 ```
 
-Complete the browser/device-code step yourself. Never paste or commit `/var/data/codex/auth.json`; it is equivalent to a password. The checked-in worker configuration uses `BAND_AGENT_BRAIN=CODEX` with `BAND_AGENT_ALLOW_RESPONSES_FALLBACK=false`, so a judged result cannot silently fall back to a different runtime.
+Complete the browser/device-code step yourself. Never paste or commit `/var/data/codex/auth.json`; it is equivalent to a password. The worker accepts only `BAND_AGENT_BRAIN=CODEX`; the API-backed Responses mode and fallback path are removed, so a judged result cannot silently switch runtimes.
 
 ## Real-run gates
 
@@ -63,7 +63,7 @@ The two Linq destinations and the Documenso buyer must be consenting role-player
 
 ## Judged sequence
 
-1. A teammate opens the $5 Stripe test Checkout and completes it with a Stripe test card. This is not an owner action and no money moves.
+1. An authenticated owner opens the $5 Stripe test Checkout and a teammate completes it with a Stripe test card. This creates no `Approval` record, is not one of the two counted owner approvals, and moves no money.
 2. The signed Stripe webhook starts the Render Terac comparison task.
 3. Owner approves Terac's winner (owner action 1).
 4. Render runs Monid discovery, OpenRouter-routed GPT-5.6 Luna/Linq outreach, and fail-once retry proof in parallel.

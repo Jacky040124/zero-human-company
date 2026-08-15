@@ -16,7 +16,10 @@ export function createProviderRegistry(): ProviderRegistry {
   const config = getConfig()
   if (config.PROVIDER_MODE === 'fake') {
     return new Map<string, ProviderPort<any, any>>([
-      ['STRIPE', new FakeProvider('STRIPE', 'checkout.session.create')],
+      ['STRIPE', new FakeProvider('STRIPE', 'checkout.session.create', () => ({
+        accepted: true,
+        checkoutUrl: `${config.PUBLIC_BASE_URL}/app/dashboard?payment=fake`,
+      }))],
       ['TERAC', new FakeTeracProvider()],
       ['LINQ', new FakeProvider('LINQ', 'message.send')],
       ['BAND', new FakeProvider('BAND', 'external_agents.negotiate')],

@@ -27,7 +27,7 @@ const configSchema = z.object({
   OPENROUTER_MODEL: z.literal('openai/gpt-5.6-luna').default('openai/gpt-5.6-luna'),
   STRIPE_SECRET_KEY: optionalEnv(z.string()),
   STRIPE_WEBHOOK_SECRET: optionalEnv(z.string()),
-  STRIPE_MODE: z.enum(['TEST', 'LIVE']).default('TEST'),
+  STRIPE_MODE: z.literal('TEST').default('TEST'),
   LINQ_API_BASE_URL: optionalEnv(z.string().url()),
   LINQ_API_KEY: optionalEnv(z.string()),
   LINQ_WEBHOOK_SECRET: optionalEnv(z.string()),
@@ -40,8 +40,7 @@ const configSchema = z.object({
   TERAC_CONTRACT_REVIEW_PATH: optionalEnv(z.string()),
   BAND_REST_URL: z.string().url().default('https://app.band.ai'),
   BAND_WS_URL: z.string().url().default('wss://app.band.ai/api/v1/socket/websocket'),
-  BAND_AGENT_BRAIN: z.enum(['CODEX', 'RESPONSES']).default('CODEX'),
-  BAND_AGENT_ALLOW_RESPONSES_FALLBACK: booleanFromEnv,
+  BAND_AGENT_BRAIN: z.literal('CODEX').default('CODEX'),
   BAND_CODEX_THREAD_STATE_PATH: optionalEnv(z.string().min(1)),
   BAND_CODEX_WORKING_DIRECTORY: optionalEnv(z.string().min(1)),
   BAND_CODEX_RUNTIME_HOME: optionalEnv(z.string().min(1)),
@@ -64,7 +63,6 @@ const configSchema = z.object({
   MONID_API_KEY: optionalEnv(z.string()),
   RENDER_API_KEY: optionalEnv(z.string()),
   RENDER_OWNER_ID: optionalEnv(z.string()),
-  RENDER_WORKFLOW_ID: optionalEnv(z.string()),
   RENDER_WORKFLOW_SLUG: optionalEnv(z.string()),
 })
 

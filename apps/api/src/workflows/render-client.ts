@@ -1,5 +1,6 @@
 import { Render } from '@renderinc/sdk'
 import { RenderTaskTriggerStatus } from '@prisma/client'
+import { randomUUID } from 'node:crypto'
 import { db } from '../db.js'
 import { getConfig } from '../config.js'
 import type { WorkflowTaskSlug } from './tasks.js'
@@ -13,7 +14,7 @@ const taskNames: Record<WorkflowTaskSlug, string> = {
   'prove-render-retry': 'proveRenderRetry',
 }
 
-const triggerLeaseMs = 30_000
+const triggerLeaseMs = 15 * 60_000
 
 type RenderTaskDetails = {
   id: string
@@ -61,23 +62,34 @@ async function persistProviderRun(
   demoRunId: string,
   slug: WorkflowTaskSlug,
   externalId: string,
+  triggerToken: string | null,
+  expectedExternalId: string | null,
   details?: RenderTaskDetails,
-): Promise<void> {
+): Promise<boolean> {
   const run = details ? normalizedRun(details) : { status: 'PENDING', attempt: 0, retried: false }
-  await db.renderTaskIntent.update({
-    where: { id: intentId },
+  const persisted = await db.renderTaskIntent.updateMany({
+    where: { id: intentId, triggerToken, externalId: expectedExternalId },
     data: {
       externalId,
       triggerStatus: RenderTaskTriggerStatus.TRIGGERED,
+      triggerToken: null,
       leaseExpiresAt: null,
       lastError: null,
     },
   })
+  if (persisted.count === 0) return false
   await db.workflowRun.upsert({
     where: { provider_externalId: { provider: 'RENDER', externalId } },
     create: { demoRunId, externalId, taskSlug: slug, live: true, ...run },
     update: run,
   })
+  return true
+}
+
+async function winningExternalId(intentId: string, slug: WorkflowTaskSlug): Promise<string> {
+  const active = await db.renderTaskIntent.findUniqueOrThrow({ where: { id: intentId } })
+  if (active.externalId) return active.externalId
+  throw new Error(`Render task ${slug} is already being triggered; retry reconciliation shortly`)
 }
 
 async function discoverMatchingRun(
@@ -107,11 +119,16 @@ async function reconcileIntent(intent: {
       intent.demoRunId,
       intent.taskSlug as WorkflowTaskSlug,
       intent.externalId,
+      null,
+      intent.externalId,
       details,
     )
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown Render reconciliation error'
-    await db.renderTaskIntent.update({ where: { id: intent.id }, data: { lastError: message } })
+    await db.renderTaskIntent.updateMany({
+      where: { id: intent.id, externalId: intent.externalId, triggerToken: null },
+      data: { lastError: message },
+    })
     throw error
   }
 }
@@ -181,39 +198,23 @@ export async function triggerRenderTask(demoRunId: string, slug: WorkflowTaskSlu
     create: { demoRunId, taskSlug: slug },
     update: {},
   })
-  let render: RenderClient
-  try {
-    render = configuredRenderClient()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown Render configuration error'
-    await db.renderTaskIntent.update({
-      where: { id: intent.id },
-      data: { triggerStatus: RenderTaskTriggerStatus.FAILED, lastError: message, leaseExpiresAt: null },
-    })
-    throw error
-  }
+  const render = configuredRenderClient()
 
   if (intent.externalId) {
     await reconcileIntent({ ...intent, externalId: intent.externalId }, render)
     return intent.externalId
   }
 
-  try {
-    const recovered = await discoverMatchingRun(render, demoRunId, slug)
-    if (recovered) {
-      await persistProviderRun(intent.id, demoRunId, slug, recovered.id, recovered)
+  const recovered = await discoverMatchingRun(render, demoRunId, slug)
+  if (recovered) {
+    if (await persistProviderRun(intent.id, demoRunId, slug, recovered.id, null, null, recovered)) {
       return recovered.id
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown Render discovery error'
-    await db.renderTaskIntent.update({
-      where: { id: intent.id },
-      data: { triggerStatus: RenderTaskTriggerStatus.FAILED, lastError: message, leaseExpiresAt: null },
-    })
-    throw error
+    return winningExternalId(intent.id, slug)
   }
 
   const now = new Date()
+  const triggerToken = randomUUID()
   const claimed = await db.renderTaskIntent.updateMany({
     where: {
       id: intent.id,
@@ -230,43 +231,52 @@ export async function triggerRenderTask(demoRunId: string, slug: WorkflowTaskSlu
     data: {
       triggerStatus: RenderTaskTriggerStatus.TRIGGERING,
       triggerAttempts: { increment: 1 },
+      triggerToken,
       leaseExpiresAt: new Date(now.getTime() + triggerLeaseMs),
       lastError: null,
     },
   })
 
   if (claimed.count === 0) {
-    const active = await db.renderTaskIntent.findUniqueOrThrow({ where: { id: intent.id } })
-    if (active.externalId) return active.externalId
-    throw new Error(`Render task ${slug} is already being triggered; retry reconciliation shortly`)
+    return winningExternalId(intent.id, slug)
   }
 
   // A stale lease can mean the previous caller reached Render but crashed before saving the ID.
   try {
     const recovered = await discoverMatchingRun(render, demoRunId, slug)
     if (recovered) {
-      await persistProviderRun(intent.id, demoRunId, slug, recovered.id, recovered)
-      return recovered.id
+      if (await persistProviderRun(intent.id, demoRunId, slug, recovered.id, triggerToken, null, recovered)) {
+        return recovered.id
+      }
+      return winningExternalId(intent.id, slug)
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown Render discovery error'
-    await db.renderTaskIntent.update({
-      where: { id: intent.id },
-      data: { triggerStatus: RenderTaskTriggerStatus.FAILED, lastError: message, leaseExpiresAt: null },
+    await db.renderTaskIntent.updateMany({
+      where: { id: intent.id, triggerToken },
+      data: {
+        triggerStatus: RenderTaskTriggerStatus.FAILED,
+        triggerToken: null,
+        lastError: message,
+        leaseExpiresAt: new Date(Date.now() + triggerLeaseMs),
+      },
     })
     throw error
   }
 
   try {
     const started = await render.workflows.startTask(renderTaskSlug(slug), [demoRunId])
-    await persistProviderRun(intent.id, demoRunId, slug, started.taskRunId)
-    return started.taskRunId
+    if (await persistProviderRun(intent.id, demoRunId, slug, started.taskRunId, triggerToken, null)) {
+      return started.taskRunId
+    }
+    return winningExternalId(intent.id, slug)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown Render trigger error'
-    await db.renderTaskIntent.update({
-      where: { id: intent.id },
+    await db.renderTaskIntent.updateMany({
+      where: { id: intent.id, triggerToken },
       data: {
         triggerStatus: RenderTaskTriggerStatus.FAILED,
+        triggerToken: null,
         lastError: message,
         // A transport failure can still mean Render accepted the task. Delay a blind retry
         // long enough for listTaskRuns reconciliation to observe an eventually-visible run.

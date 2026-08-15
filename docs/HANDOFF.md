@@ -1,17 +1,17 @@
 # Development handoff: frontend and backend integration
 
-This document is for Jackie and the next coding agent. It describes the published work as of August 15, 2026, how to combine it with the newer frontend work safely, and which decisions still need an explicit owner answer.
+This document is for Jackie and the next coding agent. It describes the backend integration-ready breakpoint as of August 15, 2026 and how to combine it with the newer frontend work safely after Daniel approves the merge.
 
 ## Start here
 
 There are two active lines of work in Daniel's fork:
 
 - **Newer frontend:** `main` at `bc9b9e4` (`Polish the demo for judges: simulate onboarding steps and simplify the app area.`).
-- **Backend and first integration seam:** `agent/wip-backend-integration-20260815`. Use the branch head; it includes the original foundation, Render/Band hardening, immutable Band-role routing, and the latest reconciliation and OpenRouter work described below.
+- **Backend integration seam:** `agent/wip-backend-integration-20260815`. Use its final pushed head from the breakpoint report; it includes the provider implementations, persistence/reconciliation hardening, immutable Band-role routing, shared contracts, and the API seam described below.
 
 Repository: <https://github.com/DanielOu1208/zero-human-company>
 
-The backend branch is deliberately unfinished. Daniel now has direct access to `Jacky040124/zero-human-company`, but this handoff branch intentionally remains in Daniel's fork while Jackie's agent continues its work. Do not push it directly over Jackie's branch or either repository's `main`.
+The backend code is intended to be complete at the breakpoint; external credentials, signatures, and live-provider evidence remain later operational work. This branch intentionally remains in Daniel's fork. Do not push it directly over Jackie's branch or either repository's `main`.
 
 ## Safe integration procedure
 
@@ -106,10 +106,11 @@ Once a run is loaded:
 - Timeline records become the dashboard activity list.
 - `RunControl` shows the run mode/status, proof badges, and pending owner action.
 - Owner login uses a signed, HTTP-only, same-site cookie.
+- Stripe sandbox checkout creation requires that owner session but does not create a counted approval.
 - Campaign approval refreshes the snapshot immediately; subsequent updates arrive through SSE.
 - Manual lead messages are blocked by the context while an API-backed run is active.
 
-The shared snapshot currently carries run status, pilot status, the two-owner-action count, opportunities, timeline entries, and sanitized provider proof. It intentionally contains no provider credentials or raw webhook payloads.
+The shared snapshot carries run status, pilot status, the two-owner-action count, opportunities, timeline entries, and sanitized provider proof. Opportunities include stable database IDs, nullable city, country, stage/reason, and an explicit `researchOnly` flag. It intentionally contains no provider credentials, raw webhook payloads, or persisted message bodies. The exact schema is `demoRunSnapshotSchema` in `packages/contracts`; `/api/v1/openapi.json` documents all stable routes and response fields.
 
 ## What is not integrated yet
 
@@ -120,40 +121,39 @@ Do not mistake an API connection for a finished frontend integration:
 - The lead-detail live view reduces an API-backed thread to one summary message rather than rendering persisted message history.
 - The UI does not expose run creation, fake rehearsal, verification, logout/session inspection, or manual workflow task routes.
 - API errors are displayed coarsely. There is no retry control or clear distinction between initial connection failure and SSE reconnection.
-- The checked-in OpenAPI object is only a route summary, not a complete schema-level API description, and it omits some implemented routes.
 - There are backend tests, but no browser-level or component-level tests proving the merged frontend behavior.
-- Real provider credentials, account-specific Terac paths, Render provisioning, webhook registration, and a complete judged run have not been verified by this branch.
-- The latest local check passes with 16 test files and 128 tests. The current production build should still be run after integration. This is automated code evidence, not deployed or real-provider evidence.
+- Real provider credentials, account-specific Terac paths, all webhook registrations, human signatures, and a complete judged run have not been verified by this branch.
+- Use the breakpoint report for the exact final test/build/migration counts. Automated code evidence is not browser, deployed, signature, or live-provider acceptance.
 
-## Newer instructions that must be reconciled
+## Provider decisions already resolved for integration
 
 Jackie's newer `main` also contains:
 
 - `docs/CHECKPOINT_ANSWERS.md`
 - `seed/buyer_discovery_seed.json`
 
-Read both before changing provider behavior. They were committed after the backend branch split and contain newer evidence or recommendations. Some points do not match the current WIP implementation:
+Read both during the merge because they were committed after the backend branch split. Where their recommendations differ, these owner-confirmed backend decisions are authoritative:
 
-| Area | Backend WIP | Newer instruction | Required action |
+| Area | Frozen backend decision | Frontend-merge action |
 |---|---|---|---|
-| Monid | Implements runtime HTTP discovery and requires Render credentials in judge preflight. | Use the committed pre-run Apollo/Monid seed; runtime discovery is only a stretch goal. | Prefer the verified seed for the near-term demo, but decide how its proof ID enters the database and verifier before deleting the adapter. |
-| Stripe | Creates a Checkout Session and defaults to Stripe test mode. | Recommends a reusable Payment Link and says to assert live mode. | Ask the project owner which payment mode and checkout mechanism the hackathon requires. Test mode versus live mode is a material product and safety decision. |
-| Band | Uses three external Band identities plus one persistent Render worker with separate Codex threads. | Recommends platform agents, while describing the gateway worker as an alternative. | Confirm the topology with the project owner before replacing the working adapter/worker design. |
-| Terac | Implements configurable HTTP adapters and expects account-specific paths. | Transport and response schema still require account confirmation. | Keep paths configurable; do not invent endpoints or mark provider proof as verified without an account-backed run. |
-| Render | Uses named TypeScript tasks and database reconciliation. | Confirms task results should be written to Postgres and no webhook should be invented. | Preserve the database-backed task/result approach. |
+| Monid | Runtime discovery/inspect/run/status flow; persisted results are PII-redacted and permanently research-only. | Keep the committed seed only as presentation fallback; do not replace live proof with seed data. |
+| Stripe | Real Checkout Session in `TEST` mode for $5; only a signed matching sandbox webhook activates the pilot. | Keep “Open test checkout”; do not describe it as live billing. |
+| Band | Exactly three external identities on one worker, each backed by Codex subscription threads on `gpt-5.6-sol`; API-backed Responses fallback is removed. | Preserve runtime/provider proof and do not add Claude or OpenAI-key setup. |
+| Terac | Campaign study and German-law review use configurable account-specific HTTP paths and fail closed when unavailable. | Do not invent paths or claim live evidence before account-backed validation. |
+| Render | Named tasks, Postgres intents/results, retries, leases, and reconciliation. | Preserve the database-backed task/result approach and do not invent a webhook. |
 
 The current outreach configuration is intentionally locked to `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1` and `OPENROUTER_MODEL=openai/gpt-5.6-luna`. Put the key in `OPENROUTER_API_KEY`; the previous `OPENAI_API_KEY` and `OPENAI_MODEL` settings are no longer used for outreach.
 
-Do not silently choose between contradictory instructions. Record the owner's answer in the relevant document and tests, then make the smallest code change that implements it.
+Do not reopen these choices during conflict resolution unless Daniel explicitly changes them.
 
 ## Recommended continuation order
 
 1. **Merge safely.** Create the integration branch and resolve the six conflicting files using the rules above.
 2. **Restore the automated baseline.** Run install, checks, tests, and the production build before changing behavior.
 3. **Prove the local seam.** Run PostgreSQL, migrate, create the deterministic rehearsal, start both processes, and verify `/app/dashboard` switches from the visual shell to persisted data.
-4. **Finish contract-first UI integration.** Decide which message, worker, approval, and control data the UI truly needs. Extend `packages/contracts` first, then the backend snapshot, then `src/api/runtime.ts`/`DemoContext`, then the views.
+4. **Adapt the UI to the frozen contract.** Use stable runtime IDs, nullable `city`, `researchOnly`, and the full backend stage enum in `src/api/runtime.ts`/`DemoContext`, then update the views. Request a backend contract change only if a truly required field is absent.
 5. **Remove misleading controls.** Either connect autonomy/pause/message controls to explicitly designed backend endpoints or label/disable them in API-backed mode. Do not let a local toggle imply that a real workflow stopped.
-6. **Reconcile the provider checkpoints.** Resolve Monid, Stripe, and Band choices before additional real-provider work.
+6. **Preserve the provider decisions.** Do not replace runtime Monid, Stripe TEST Checkout, or the three external Codex-backed Band identities during frontend conflict resolution.
 7. **Add integration tests.** At minimum, cover snapshot parsing, fallback-to-live switching, SSE updates, owner-auth-required behavior, and the final merged dashboard.
 8. **Only then perform operational setup.** Follow `docs/RUNBOOK.md`; keep real keys in local/Render secret storage, never Git or chat.
 

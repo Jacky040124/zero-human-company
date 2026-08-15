@@ -346,7 +346,7 @@ export function sanitizeBandPersistedText(value: string, maxLength = 1_200): str
   return value
     .replace(/("(?:api[_ -]?key|token|secret|password)"\s*:\s*")[^"]*(")/gi, '$1[REDACTED_SECRET]$2')
     .replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [REDACTED_SECRET]')
-    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_SECRET]')
+    .replace(/\b(?:sk|rk|pk|whsec)[_-][A-Za-z0-9_-]{8,}\b/g, '[REDACTED_SECRET]')
     .replace(/\b(api[_ -]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED_SECRET]')
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]')
     .replace(/https?:\/\/[^\s<>()]+/gi, '[REDACTED_URL]')

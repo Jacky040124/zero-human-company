@@ -55,7 +55,7 @@ Minimal seed: toy Offer, one Campaign + baseline revision, 5 buyers, 2 contacts,
 
 ## 3. Build order
 
-1. **Walking skeleton on `LocalWorkflowRunner`:** schema + seed + state machine + one `lead.discovered` event advancing a seeded Opportunity, exposed via `GET /api/v1/opportunities/:id/timeline`. No real provider yet.
+1. **Walking skeleton on `LocalWorkflowRunner`:** schema + seed + state machine + one `lead.discovered` event advancing a seeded Opportunity, exposed through the run snapshot and SSE endpoints. No real provider yet.
 2. Policy gate + one specialist (in-policy auto-send; out-of-policy → Approval; opt-out stops).
 3. Real providers one at a time behind their ports, each gated by an ask-before-implementing checkpoint.
 4. Harden: `demo:verify --run-id` (fails unless one run has every real proof), kill switch, run 3× clean.

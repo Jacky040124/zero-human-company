@@ -139,7 +139,13 @@ async function appendRunEventOnce(
       proofRef: event.proofRef ?? null,
     },
   })
-  if (!existing) await appendRunEvent(demoRunId, event)
+  if (existing) return
+  try {
+    await appendRunEvent(demoRunId, event)
+  } catch (error) {
+    if (event.proofRef && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return
+    throw error
+  }
 }
 
 function meanScore(scores: { clarity: number; trust: number; relevance: number }): number {

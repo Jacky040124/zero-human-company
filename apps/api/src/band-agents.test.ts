@@ -11,7 +11,6 @@ import {
   POLICY_FLOOR_EUR,
   createBandAgents,
   createCodexBrain,
-  createOpenAIBrain,
   createPlanAuthenticatedCodex,
   createRoleHandler,
   formatPolicyResponse,
@@ -25,9 +24,7 @@ import {
 } from './band-agents.js'
 
 const config: BandAgentsConfig = {
-  openAIApiKey: 'openai-secret',
   brain: 'CODEX',
-  allowResponsesFallback: false,
   codexThreadStatePath: '/tmp/zhc-band-test-threads.json',
   codexWorkingDirectory: '/tmp/zhc-band-test-workdir',
   codexRuntimeHome: '/tmp/zhc-band-test-runtime-home',
@@ -67,35 +64,24 @@ describe('Band role prompts and policy verdicts', () => {
       risks: [],
       rationale: 'Negotiator proposed it.',
       agentVotes: [{ agentId: 'policy', vote: 'ACCEPT', rationale: 'ok' }],
-    }), { runtime: 'RESPONSES', model: 'gpt-5.6-luna' })
+    }), { runtime: 'CODEX', model: CODEX_BAND_AGENT_MODEL })
     expect(content.startsWith('ZHC_VERDICT ')).toBe(true)
     const result = JSON.parse(content.slice('ZHC_VERDICT '.length))
     expect(result).toMatchObject({ ZHC_VERDICT: true, recommendation: 'ESCALATE', proposedPrice: null })
-    expect(result.ZHC_BRAIN).toEqual({ runtime: 'RESPONSES', model: 'gpt-5.6-luna' })
+    expect(result.ZHC_BRAIN).toEqual({ runtime: 'CODEX', model: CODEX_BAND_AGENT_MODEL })
   })
 
   it('redacts common secrets and raw contact details before model or Band output', () => {
-    const redacted = redactSensitiveText('Bearer abc123 token=topsecret {"apiKey":"json-secret"} email jane@example.com phone +1 (415) 555-1212 sk-abcdefghijklmnop')
+    const redacted = redactSensitiveText('Bearer abc123 token=topsecret password=do-not-keep {"apiKey":"json-secret"} email jane@example.com phone +1 (415) 555-1212 sk-or-v1-abcdefghijklmnop')
     expect(redacted).not.toContain('abc123')
     expect(redacted).not.toContain('topsecret')
+    expect(redacted).not.toContain('do-not-keep')
     expect(redacted).not.toContain('json-secret')
     expect(redacted).not.toContain('jane@example.com')
     expect(redacted).not.toContain('555-1212')
-    expect(redacted).not.toContain('sk-abcdefghijklmnop')
+    expect(redacted).not.toContain('sk-or-v1-abcdefghijklmnop')
   })
 
-  it('uses the OpenAI Responses API with the locked model and medium reasoning', async () => {
-    const create = vi.fn(async () => ({ output_text: 'result' }))
-    const brain = createOpenAIBrain({ responses: { create } } as never)
-    await expect(brain({ role: 'researcher', roomId: 'room-1', instructions: 'system', message: 'brief' })).resolves.toEqual({
-      text: 'result', runtime: 'RESPONSES', model: 'gpt-5.6-luna',
-    })
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gpt-5.6-luna',
-      reasoning: { effort: 'medium' },
-      input: [{ role: 'system', content: 'system' }, { role: 'user', content: 'brief' }],
-    }))
-  })
 })
 
 describe('Band role handler', () => {
@@ -221,7 +207,6 @@ describe('Band runtime configuration', () => {
   it('loads only role-specific Band credentials', () => {
     const loaded = loadBandAgentsConfig({
       OPENAI_API_KEY: 'openai',
-      BAND_API_KEY: 'generic-key-must-not-be-used',
       BAND_RESEARCHER_AGENT_ID: 'r', BAND_RESEARCHER_API_KEY: 'rk',
       BAND_NEGOTIATOR_AGENT_ID: 'n', BAND_NEGOTIATOR_API_KEY: 'nk',
       BAND_POLICY_AGENT_ID: 'p', BAND_POLICY_AGENT_API_KEY: 'pk',
@@ -233,7 +218,6 @@ describe('Band runtime configuration', () => {
     })
     expect(loaded).toMatchObject({
       brain: 'CODEX',
-      allowResponsesFallback: false,
       codexThreadStatePath: DEFAULT_CODEX_THREAD_STATE_PATH,
       codexWorkingDirectory: DEFAULT_CODEX_WORKING_DIRECTORY,
       codexRuntimeHome: DEFAULT_CODEX_RUNTIME_HOME,
@@ -247,8 +231,17 @@ describe('Band runtime configuration', () => {
       BAND_NEGOTIATOR_AGENT_ID: 'n', BAND_NEGOTIATOR_API_KEY: 'nk',
       BAND_POLICY_AGENT_ID: 'p', BAND_POLICY_AGENT_API_KEY: 'pk',
     })
-    expect(loaded).toMatchObject({ brain: 'CODEX', allowResponsesFallback: false })
-    expect(loaded.openAIApiKey).toBeUndefined()
+    expect(loaded).toMatchObject({ brain: 'CODEX' })
+  })
+
+  it('rejects the API-backed Responses brain', () => {
+    const base = {
+      BAND_RESEARCHER_AGENT_ID: 'r', BAND_RESEARCHER_API_KEY: 'rk',
+      BAND_NEGOTIATOR_AGENT_ID: 'n', BAND_NEGOTIATOR_API_KEY: 'nk',
+      BAND_POLICY_AGENT_ID: 'p', BAND_POLICY_AGENT_API_KEY: 'pk',
+    }
+    expect(() => loadBandAgentsConfig({ ...base, BAND_AGENT_BRAIN: 'RESPONSES' }))
+      .toThrow('API-backed Band brains are disabled')
   })
 
   it('constructs Codex without apiKey and strips explicit API auth from its child environment', () => {
@@ -413,38 +406,14 @@ describe('Codex thread brain', () => {
   })
 
   it('does not fall back after a Codex failure by default', async () => {
-    const fallback = vi.fn(async () => ({
-      text: 'fallback', runtime: 'RESPONSES' as const, model: 'gpt-5.6-luna' as const,
-    }))
     const brain = await createCodexBrain({
       client: {
         startThread: () => ({ id: null, run: vi.fn(async () => { throw new Error('secret internal failure') }) }),
         resumeThread: () => ({ id: null, run: vi.fn() }),
       },
       state: { load: async () => ({}), save: async () => {} },
-      responsesFallback: fallback,
     })
     await expect(brain({ role: 'researcher', roomId: 'room-1', instructions: 'research', message: 'brief' }))
       .rejects.toThrow('Codex brain turn failed')
-    expect(fallback).not.toHaveBeenCalled()
-  })
-
-  it('uses and labels the Responses fallback only when explicitly allowed', async () => {
-    const fallback = vi.fn(async () => ({
-      text: 'fallback', runtime: 'RESPONSES' as const, model: 'gpt-5.6-luna' as const,
-    }))
-    const brain = await createCodexBrain({
-      client: {
-        startThread: () => ({ id: 'thread-r', run: vi.fn(async () => { throw new Error('failure') }) }),
-        resumeThread: () => ({ id: 'thread-r', run: vi.fn() }),
-      },
-      state: { load: async () => ({}), save: async () => {} },
-      allowResponsesFallback: true,
-      responsesFallback: fallback,
-    })
-    await expect(brain({ role: 'researcher', roomId: 'room-1', instructions: 'research', message: 'brief' })).resolves.toEqual({
-      text: 'fallback', runtime: 'RESPONSES', model: 'gpt-5.6-luna',
-    })
-    expect(fallback).toHaveBeenCalledOnce()
   })
 })
