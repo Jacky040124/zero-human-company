@@ -76,18 +76,31 @@ export async function verifyDemoRun(runId: string): Promise<VerificationReport> 
     && item.status === 'SUCCEEDED'
     && Boolean(item.providerExternalId))
   const storedBandResult = record(bandAction?.redactedResponse)
-  const bandProof = record(storedBandResult?.summary) ?? record(storedBandResult?.data)
+  const bandSummary = record(storedBandResult?.summary)
   const bandData = record(storedBandResult?.data)
-  const externalAgentIds = record(bandProof?.externalAgentIds)
+  const externalAgentIds = record(bandData?.externalAgentIds)
+  const summaryAgentIds = record(bandSummary?.externalAgentIds)
+  const requiredAgentRoles = ['negotiator', 'researcher', 'policyReviewer'] as const
   const requiredExternalAgents = ['negotiator', 'researcher', 'policyReviewer']
     .map((role) => externalAgentIds?.[role])
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
   const uniqueExternalAgents = new Set(requiredExternalAgents)
-  const codexSolProven = String(bandProof?.runtime).toUpperCase() === 'CODEX' && bandProof?.model === 'gpt-5.6-sol'
+  const exactExternalAgentShape = Boolean(externalAgentIds)
+    && Object.keys(externalAgentIds!).length === requiredAgentRoles.length
+    && requiredAgentRoles.every((role) => typeof externalAgentIds?.[role] === 'string')
+  const sameExternalAgents = JSON.stringify(summaryAgentIds) === JSON.stringify(externalAgentIds)
+  const dataRoomId = typeof bandData?.roomId === 'string' ? bandData.roomId : null
+  const coherentStoredProof = Boolean(bandSummary && bandData && dataRoomId)
+    && bandSummary?.roomId === dataRoomId
+    && bandSummary?.briefMessageId === bandData?.briefMessageId
+    && bandSummary?.runtime === bandData?.runtime
+    && bandSummary?.model === bandData?.model
+    && sameExternalAgents
+  const codexSolProven = String(bandData?.runtime).toUpperCase() === 'CODEX' && bandData?.model === 'gpt-5.6-sol'
   const storedVerdict = negotiationVerdictSchema.safeParse(bandData?.verdict)
   const bandHandoff = run.agentHandoffs.find((item) => item.live
     && item.status === 'COMPLETE'
-    && Boolean(item.roomId)
+    && item.roomId === dataRoomId
     && negotiationVerdictSchema.safeParse(item.verdict).success)
   const handoffVerdict = negotiationVerdictSchema.safeParse(bandHandoff?.verdict)
   const floorSafeProceed = handoffVerdict.success
@@ -100,14 +113,16 @@ export async function verifyDemoRun(runId: string): Promise<VerificationReport> 
   check(
     'real Band external-agent verdict',
     Boolean(bandHandoff)
-      && bandAction?.providerExternalId === `band:${bandHandoff?.roomId}`
+      && coherentStoredProof
+      && bandAction?.providerExternalId === `band:${dataRoomId}`
+      && exactExternalAgentShape
       && requiredExternalAgents.length === 3
       && uniqueExternalAgents.size === 3
       && codexSolProven
       && floorSafeProceed
       && sameVerdict,
     bandAction
-      ? `external agents=${uniqueExternalAgents.size}, runtime=${String(bandProof?.runtime ?? 'unproven')}, model=${String(bandProof?.model ?? 'unproven')}`
+      ? `external agents=${uniqueExternalAgents.size}, runtime=${String(bandData?.runtime ?? 'unproven')}, model=${String(bandData?.model ?? 'unproven')}`
       : 'requires live room, three external identities, policy verdict, and transcript-authored Codex/Sol proof',
   )
   check('Render retry proof', run.workflowRuns.some((item) => item.live && ['SUCCEEDED', 'COMPLETED'].includes(item.status) && item.retried && item.attempt >= 2), 'requires successful live retry')

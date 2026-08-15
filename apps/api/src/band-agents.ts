@@ -1,3 +1,4 @@
+import './env.js'
 import { Agent, GenericAdapter, isDirectExecution, type AdapterToolsProtocol } from '@band-ai/sdk'
 import { Codex, type CodexOptions, type ThreadOptions } from '@openai/codex-sdk'
 import { access, chmod, copyFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
@@ -85,7 +86,7 @@ export function rolePrompt(role: BandAgentRole): string {
 
 export function redactSensitiveText(value: string): string {
   return value
-    .replace(/("(?:api[_ -]?key|token|secret)"\s*:\s*")[^"]*(")/gi, '$1[REDACTED_SECRET]$2')
+    .replace(/("(?:api[_ -]?key|token|secret|password)"\s*:\s*")[^"]*(")/gi, '$1[REDACTED_SECRET]$2')
     .replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [REDACTED_SECRET]')
     .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, '[REDACTED_SECRET]')
     .replace(/\b(api[_ -]?key|token|secret)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED_SECRET]')
@@ -477,6 +478,7 @@ type AgentFactory = (role: BandAgentRole, identity: BandAgentIdentity, brain: Ro
 
 const defaultAgentFactory: AgentFactory = (role, identity, brain, config) => Agent.create({
   adapter: new GenericAdapter(createRoleHandler(role, brain)),
+  linkOptions: { conflictPolicy: 'supersede' },
   config: {
     agentId: identity.agentId,
     apiKey: identity.apiKey,

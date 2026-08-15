@@ -1,19 +1,15 @@
-import { config as loadDotenv } from 'dotenv'
-import { fileURLToPath } from 'node:url'
-import { dirname, join, resolve } from 'node:path'
+import './env.js'
 import { z } from 'zod'
-
-const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
-loadDotenv({
-  // Local development uses the root .env.local. Render-injected variables and
-  // test process.env values still win because dotenv does not override them.
-  path: [join(repositoryRoot, '.env.local'), join(repositoryRoot, '.env')],
-})
 
 const booleanFromEnv = z
   .enum(['true', 'false'])
   .default('false')
   .transform((value) => value === 'true')
+
+const optionalEnv = <T extends z.ZodType>(schema: T) => z.preprocess(
+  (value) => typeof value === 'string' && value.trim() === '' ? undefined : value,
+  schema.optional(),
+)
 
 const configSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -26,49 +22,49 @@ const configSchema = z.object({
   JUDGE_MODE: booleanFromEnv,
   REAL_ACTIONS_ENABLED: booleanFromEnv,
   PROVIDER_MODE: z.enum(['fake', 'real']).default('fake'),
-  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: optionalEnv(z.string()),
   OPENAI_MODEL: z.literal('gpt-5.6-luna').default('gpt-5.6-luna'),
-  STRIPE_SECRET_KEY: z.string().optional(),
-  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_SECRET_KEY: optionalEnv(z.string()),
+  STRIPE_WEBHOOK_SECRET: optionalEnv(z.string()),
   STRIPE_MODE: z.enum(['TEST', 'LIVE']).default('TEST'),
-  LINQ_API_BASE_URL: z.string().url().optional(),
-  LINQ_API_KEY: z.string().optional(),
-  LINQ_WEBHOOK_SECRET: z.string().optional(),
-  LINQ_NORDLICHT_RECIPIENT: z.string().optional(),
-  LINQ_MAAS_RECIPIENT: z.string().optional(),
-  TERAC_TRANSPORT: z.enum(['http', 'mcp']).optional(),
-  TERAC_API_BASE_URL: z.string().url().optional(),
-  TERAC_API_KEY: z.string().optional(),
-  TERAC_STUDY_PATH: z.string().optional(),
-  TERAC_CONTRACT_REVIEW_PATH: z.string().optional(),
+  LINQ_API_BASE_URL: optionalEnv(z.string().url()),
+  LINQ_API_KEY: optionalEnv(z.string()),
+  LINQ_WEBHOOK_SECRET: optionalEnv(z.string()),
+  LINQ_NORDLICHT_RECIPIENT: optionalEnv(z.string()),
+  LINQ_MAAS_RECIPIENT: optionalEnv(z.string()),
+  TERAC_TRANSPORT: optionalEnv(z.enum(['http', 'mcp'])),
+  TERAC_API_BASE_URL: optionalEnv(z.string().url()),
+  TERAC_API_KEY: optionalEnv(z.string()),
+  TERAC_STUDY_PATH: optionalEnv(z.string()),
+  TERAC_CONTRACT_REVIEW_PATH: optionalEnv(z.string()),
   BAND_REST_URL: z.string().url().default('https://app.band.ai'),
   BAND_WS_URL: z.string().url().default('wss://app.band.ai/api/v1/socket/websocket'),
   BAND_AGENT_BRAIN: z.enum(['CODEX', 'RESPONSES']).default('CODEX'),
   BAND_AGENT_ALLOW_RESPONSES_FALLBACK: booleanFromEnv,
-  BAND_CODEX_THREAD_STATE_PATH: z.string().min(1).optional(),
-  BAND_CODEX_WORKING_DIRECTORY: z.string().min(1).optional(),
-  BAND_CODEX_RUNTIME_HOME: z.string().min(1).optional(),
-  BAND_RESEARCHER_AGENT_ID: z.string().optional(),
-  BAND_RESEARCHER_API_KEY: z.string().optional(),
-  BAND_NEGOTIATOR_AGENT_ID: z.string().optional(),
-  BAND_NEGOTIATOR_API_KEY: z.string().optional(),
-  BAND_POLICY_AGENT_ID: z.string().optional(),
-  BAND_POLICY_AGENT_API_KEY: z.string().optional(),
-  DOCUMENSO_API_BASE_URL: z.string().url().default('https://app.documenso.com/api/v2'),
-  DOCUMENSO_API_KEY: z.string().optional(),
-  DOCUMENSO_TEMPLATE_ID: z.string().optional(),
-  DOCUMENSO_WEBHOOK_SECRET: z.string().optional(),
-  DOCUMENSO_CREATE_PATH: z.string().default('/envelope/use'),
-  DOCUMENSO_RECONCILE_PATH: z.string().default('/envelope?externalId={externalId}'),
-  DOCUMENSO_OWNER_RECIPIENT_ID: z.string().optional(),
-  DOCUMENSO_BUYER_RECIPIENT_ID: z.string().optional(),
-  DOCUMENSO_BUYER_EMAIL: z.string().email().optional(),
-  MONID_API_BASE_URL: z.string().url().optional(),
-  MONID_API_KEY: z.string().optional(),
-  RENDER_API_KEY: z.string().optional(),
-  RENDER_OWNER_ID: z.string().optional(),
-  RENDER_WORKFLOW_ID: z.string().optional(),
-  RENDER_WORKFLOW_SLUG: z.string().optional(),
+  BAND_CODEX_THREAD_STATE_PATH: optionalEnv(z.string().min(1)),
+  BAND_CODEX_WORKING_DIRECTORY: optionalEnv(z.string().min(1)),
+  BAND_CODEX_RUNTIME_HOME: optionalEnv(z.string().min(1)),
+  BAND_RESEARCHER_AGENT_ID: optionalEnv(z.string()),
+  BAND_RESEARCHER_API_KEY: optionalEnv(z.string()),
+  BAND_NEGOTIATOR_AGENT_ID: optionalEnv(z.string()),
+  BAND_NEGOTIATOR_API_KEY: optionalEnv(z.string()),
+  BAND_POLICY_AGENT_ID: optionalEnv(z.string()),
+  BAND_POLICY_AGENT_API_KEY: optionalEnv(z.string()),
+  DOCUMENSO_API_BASE_URL: optionalEnv(z.string().url()).default('https://app.documenso.com/api/v2'),
+  DOCUMENSO_API_KEY: optionalEnv(z.string()),
+  DOCUMENSO_TEMPLATE_ID: optionalEnv(z.string()),
+  DOCUMENSO_WEBHOOK_SECRET: optionalEnv(z.string()),
+  DOCUMENSO_CREATE_PATH: optionalEnv(z.string()).default('/envelope/use'),
+  DOCUMENSO_RECONCILE_PATH: optionalEnv(z.string()).default('/envelope?externalId={externalId}'),
+  DOCUMENSO_OWNER_RECIPIENT_ID: optionalEnv(z.string()),
+  DOCUMENSO_BUYER_RECIPIENT_ID: optionalEnv(z.string()),
+  DOCUMENSO_BUYER_EMAIL: optionalEnv(z.string().email()),
+  MONID_API_BASE_URL: optionalEnv(z.string().url()),
+  MONID_API_KEY: optionalEnv(z.string()),
+  RENDER_API_KEY: optionalEnv(z.string()),
+  RENDER_OWNER_ID: optionalEnv(z.string()),
+  RENDER_WORKFLOW_ID: optionalEnv(z.string()),
+  RENDER_WORKFLOW_SLUG: optionalEnv(z.string()),
 })
 
 export type AppConfig = z.infer<typeof configSchema>
@@ -107,8 +103,6 @@ export const judgeRequiredEnv = [
   'DOCUMENSO_API_KEY',
   'DOCUMENSO_TEMPLATE_ID',
   'DOCUMENSO_WEBHOOK_SECRET',
-  'DOCUMENSO_CREATE_PATH',
-  'DOCUMENSO_RECONCILE_PATH',
   'DOCUMENSO_OWNER_RECIPIENT_ID',
   'DOCUMENSO_BUYER_RECIPIENT_ID',
   'DOCUMENSO_BUYER_EMAIL',

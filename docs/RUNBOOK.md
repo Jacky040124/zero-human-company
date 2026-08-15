@@ -4,7 +4,7 @@ The judged artifact is one persisted `DemoRun`. Never combine proof from rehears
 
 ## Local rehearsal
 
-1. Copy `.env.example` to `.env`. Keep real keys out of Git and chat.
+1. Copy `.env.example` to `.env.local`. Keep real keys out of Git and chat; local API, CLI, Workflow, Prisma, and Band worker commands load this exact root file.
 2. Start PostgreSQL with `docker compose up -d postgres`.
 3. Run `npm install`, `npm run db:migrate`, then `npm run demo:run`.
 4. Run `npm run dev` and open `/app/dashboard`.
@@ -15,7 +15,7 @@ The judged artifact is one persisted `DemoRun`. Never combine proof from rehears
 `render.yaml` creates the same-origin web service, PostgreSQL, and one single-instance background worker for the three external Band agents. Render Workflows currently requires one dashboard setup step:
 
 1. Create a TypeScript Workflow service from this repository.
-2. Build with `npm ci && npm run build`.
+2. Build with `npm ci && npm run db:generate && npm run build`.
 3. Start with `npm run start:workflows -w @zero-human/api`.
 4. Share the same environment group and database as the web service.
 5. Put the workflow slug in `RENDER_WORKFLOW_SLUG`. The app triggers the six registered named tasks through the official Render SDK.
@@ -41,17 +41,17 @@ For Render, open the background worker's shell after its disk exists and authent
 
 ```sh
 mkdir -p /var/data/codex
-CODEX_HOME=/var/data/codex codex login --device-auth
-CODEX_HOME=/var/data/codex codex login status
+CODEX_HOME=/var/data/codex /app/node_modules/.bin/codex login --device-auth
+CODEX_HOME=/var/data/codex /app/node_modules/.bin/codex login status
 ```
 
 Complete the browser/device-code step yourself. Never paste or commit `/var/data/codex/auth.json`; it is equivalent to a password. The checked-in worker configuration uses `BAND_AGENT_BRAIN=CODEX` with `BAND_AGENT_ALLOW_RESPONSES_FALLBACK=false`, so a judged result cannot silently fall back to a different runtime.
 
 ## Real-run gates
 
-Keep `JUDGE_MODE=false`, `PROVIDER_MODE=fake`, and `REAL_ACTIONS_ENABLED=false` until setup is complete. Enter credentials directly in `.env` or Render's secret environment group. Do not paste keys into chat.
+Keep `JUDGE_MODE=false`, `PROVIDER_MODE=fake`, and `REAL_ACTIONS_ENABLED=false` until setup is complete. Enter credentials directly in root `.env.local` or Render's secret environment group. Do not paste keys into chat.
 
-Run:
+Run (the commands load root `.env.local` automatically):
 
 ```sh
 npm run judge:preflight

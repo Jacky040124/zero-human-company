@@ -296,6 +296,7 @@ function negotiationBrief(
 
 export function sanitizeBandPersistedText(value: string, maxLength = 1_200): string {
   return value
+    .replace(/("(?:api[_ -]?key|token|secret|password)"\s*:\s*")[^"]*(")/gi, '$1[REDACTED_SECRET]$2')
     .replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [REDACTED_SECRET]')
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_SECRET]')
     .replace(/\b(api[_ -]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED_SECRET]')

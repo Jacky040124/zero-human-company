@@ -1,3 +1,4 @@
+import './env.js'
 import { task } from '@renderinc/sdk/workflows'
 import { Provider, ProviderActionStatus } from '@prisma/client'
 import { db } from './db.js'

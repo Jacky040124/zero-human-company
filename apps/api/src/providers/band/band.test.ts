@@ -243,7 +243,7 @@ describe('Band external-agent coordination', () => {
       message('policy', `ZHC_VERDICT ${JSON.stringify(validVerdict)}`),
     ]]
     const provider = new BandExternalAgentProvider(config, coordinator, vi.fn(async () => {}))
-    const sensitive = 'jane@example.com +1 (415) 555-1212 Bearer abc123 token=topsecret sk-abcdefghijklmnop https://private.example/x'
+    const sensitive = 'jane@example.com +1 (415) 555-1212 Bearer abc123 token=topsecret sk-abcdefghijklmnop https://private.example/x {"apiKey":"json-key","password":"json-password"}'
 
     await provider.execute({
       demoRunId: 'demo-redaction',
@@ -252,7 +252,7 @@ describe('Band external-agent coordination', () => {
     })
 
     const persisted = coordinator.sent[0]?.content ?? ''
-    for (const secret of ['jane@example.com', '555-1212', 'abc123', 'topsecret', 'sk-abcdefghijklmnop', 'private.example', 'local-secret']) {
+    for (const secret of ['jane@example.com', '555-1212', 'abc123', 'topsecret', 'sk-abcdefghijklmnop', 'private.example', 'local-secret', 'json-key', 'json-password']) {
       expect(persisted).not.toContain(secret)
     }
     expect(sanitizeBandPersistedText(sensitive)).toContain('[REDACTED_SECRET]')
