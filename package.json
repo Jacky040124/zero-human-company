@@ -1,11 +1,31 @@
 {
-  "name": "lead-factory",
+  "name": "zero-human-company",
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "predev": "npm run build -w @zero-human/contracts",
+    "dev": "concurrently -n web,api -c cyan,magenta \"vite\" \"npm run dev -w @zero-human/api\"",
+    "dev:web": "vite",
+    "dev:api": "npm run dev -w @zero-human/api",
+    "build": "npm run build -w @zero-human/contracts && tsc -b && vite build && npm run build -w @zero-human/api",
+    "start": "npm run start -w @zero-human/api",
+    "check": "npm run check -w @zero-human/contracts && tsc -b && npm run check -w @zero-human/api && npm test",
+    "test": "vitest run",
+    "db:generate": "npm run db:generate -w @zero-human/api",
+    "db:migrate": "npm run db:migrate -w @zero-human/api",
+    "db:reset": "npm run db:reset -w @zero-human/api",
+    "demo:seed": "npm run demo:seed -w @zero-human/api",
+    "demo:run": "npm run demo:run -w @zero-human/api",
+    "judge:preflight": "npm run judge:preflight -w @zero-human/api",
+    "demo:verify": "npm run demo:verify -w @zero-human/api --",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -20,8 +40,10 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
+    "concurrently": "^9.2.1",
     "tailwindcss": "^4.1.12",
     "typescript": "~5.9.2",
-    "vite": "^8.2.0"
+    "vite": "^8.2.0",
+    "vitest": "^4.0.18"
   }
 }

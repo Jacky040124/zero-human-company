@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { featuredLeadId } from '../../data'
 import type { Lead, LeadStatus } from '../../data'
 import { LeadModal } from '../../components/LeadModal'
 import { LeadProgress } from '../../components/LeadProgress'
 import { useDemo } from '../../state/DemoContext'
+import { RunControl } from '../../components/RunControl'
 
 const statusRank: Record<LeadStatus, number> = {
   negotiating: 0,
@@ -15,8 +15,8 @@ const statusRank: Record<LeadStatus, number> = {
 
 function sortPipeline(leads: Lead[]): Lead[] {
   return [...leads].sort((a, b) => {
-    if (a.id === featuredLeadId) return -1
-    if (b.id === featuredLeadId) return 1
+    if (a.featured) return -1
+    if (b.featured) return 1
     return statusRank[a.status] - statusRank[b.status]
   })
 }
@@ -52,7 +52,9 @@ export function Dashboard() {
         Every EU buyer in motion, and how far each conversation has gone.
       </p>
 
-      <div className="mt-6 grid grid-cols-4 gap-3">
+      <RunControl />
+
+      <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Buyers found" value={stats.found} />
         <StatCard label="In conversation" value={stats.inConversation} />
         <StatCard label="Negotiating" value={stats.negotiating} />
@@ -90,11 +92,11 @@ export function Dashboard() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35 }}
               onClick={() => setOpenId(lead.id)}
-              className={`flex cursor-pointer items-center gap-4 px-3 py-3 hover:bg-hover ${
-                lead.id === featuredLeadId ? 'border-l-2 border-l-accent bg-accent-soft/40' : ''
+              className={`flex cursor-pointer flex-col items-stretch gap-3 px-3 py-3 hover:bg-hover sm:flex-row sm:items-center sm:gap-4 ${
+                lead.featured ? 'border-l-2 border-l-accent bg-accent-soft/40' : ''
               }`}
             >
-              <div className="w-44 shrink-0 min-w-0">
+              <div className="w-full shrink-0 min-w-0 sm:w-44">
                 <p className="truncate font-medium text-ink">{lead.company}</p>
                 <p className="text-xs text-muted">
                   {lead.city}, {lead.country}

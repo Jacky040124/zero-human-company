@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { discoverySources, featuredLeadId, statusLabel } from '../../data'
+import { discoverySources, statusLabel } from '../../data'
 import type { LeadStatus } from '../../data'
 import { LiveDot, StatusPill } from '../../components/ui'
 import { useDemo } from '../../state/DemoContext'
@@ -92,13 +92,13 @@ export function Buyers() {
                   animate={{
                     opacity: 1,
                     backgroundColor:
-                      lead.id === featuredLeadId
+                      lead.featured
                         ? 'rgba(231,243,248,1)'
                         : 'rgba(0,0,0,0)',
                   }}
                   transition={{ duration: 1.2 }}
                   className={`border-t border-line hover:bg-hover ${
-                    lead.id === featuredLeadId
+                    lead.featured
                       ? 'shadow-[inset_3px_0_0_0_var(--color-accent)]'
                       : ''
                   }`}
@@ -109,7 +109,7 @@ export function Buyers() {
                       className="font-medium text-ink no-underline hover:text-accent"
                     >
                       {lead.company}
-                      {lead.id === featuredLeadId ? (
+                      {lead.featured ? (
                         <span className="ml-2 rounded bg-accent-soft px-1.5 py-0.5 text-[0.68rem] font-medium text-accent">
                           Open this
                         </span>

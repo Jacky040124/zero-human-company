@@ -1,0 +1,72 @@
+import { getConfig } from '../config.js'
+import type { ProviderRegistry } from '../outbox.js'
+import { BandExternalAgentProvider } from './band/index.js'
+import { DocumensoProvider } from './documenso/index.js'
+import { FakeProvider } from './fake.js'
+import { LinqMessageProvider } from './linq/index.js'
+import { FakeMonidDiscoveryProvider, MonidDiscoveryProvider } from './monid/index.js'
+import { OpenAISalesProvider } from './openai.js'
+import { standardDocumensoCodec, standardTeracCodec } from './standard-codecs.js'
+import { StripeCheckoutProvider } from './stripe/index.js'
+import { FakeTeracProvider, TeracProvider } from './terac/index.js'
+import type { ProviderPort } from './types.js'
+import { TeracContractReviewProvider } from './terac/contract-review.js'
+
+export function createProviderRegistry(): ProviderRegistry {
+  const config = getConfig()
+  if (config.PROVIDER_MODE === 'fake') {
+    return new Map<string, ProviderPort<any, any>>([
+      ['STRIPE', new FakeProvider('STRIPE', 'checkout.session.create')],
+      ['TERAC', new FakeTeracProvider()],
+      ['LINQ', new FakeProvider('LINQ', 'message.send')],
+      ['BAND', new FakeProvider('BAND', 'external_agents.negotiate')],
+      ['DOCUMENSO', new FakeProvider('DOCUMENSO', 'sequential-envelope')],
+      ['MONID', new FakeMonidDiscoveryProvider()],
+      ['OPENAI', new FakeProvider('OPENAI', 'structured-outreach')],
+      ['RENDER', new FakeProvider('RENDER', 'workflow.task')],
+    ])
+  }
+  const stripe = new StripeCheckoutProvider({
+    secretKey: config.STRIPE_SECRET_KEY ?? '',
+    webhookSecret: config.STRIPE_WEBHOOK_SECRET ?? '',
+    successUrl: `${config.PUBLIC_BASE_URL}/app/dashboard?payment=success`,
+    cancelUrl: `${config.PUBLIC_BASE_URL}/app/dashboard?payment=cancelled`,
+    mode: config.STRIPE_MODE,
+  })
+  const registry: ProviderRegistry = new Map<string, ProviderPort<any, any>>([
+    ['STRIPE', stripe],
+    ['TERAC', new TeracProvider({ baseUrl: config.TERAC_API_BASE_URL, apiKey: config.TERAC_API_KEY, accountStudyPath: config.TERAC_STUDY_PATH }, standardTeracCodec)],
+    ['LINQ', new LinqMessageProvider({ apiBaseUrl: config.LINQ_API_BASE_URL ?? '', apiKey: config.LINQ_API_KEY ?? '', webhookSecret: config.LINQ_WEBHOOK_SECRET ?? '' })],
+    ['BAND', new BandExternalAgentProvider({
+      restUrl: config.BAND_REST_URL,
+      researcherAgentId: config.BAND_RESEARCHER_AGENT_ID,
+      researcherApiKey: config.BAND_RESEARCHER_API_KEY,
+      negotiatorAgentId: config.BAND_NEGOTIATOR_AGENT_ID,
+      negotiatorApiKey: config.BAND_NEGOTIATOR_API_KEY,
+      policyReviewerAgentId: config.BAND_POLICY_AGENT_ID,
+      policyReviewerApiKey: config.BAND_POLICY_AGENT_API_KEY,
+    })],
+    ['DOCUMENSO', new DocumensoProvider({ baseUrl: config.DOCUMENSO_API_BASE_URL, apiKey: config.DOCUMENSO_API_KEY, templateId: config.DOCUMENSO_TEMPLATE_ID }, standardDocumensoCodec(config.DOCUMENSO_CREATE_PATH, config.DOCUMENSO_RECONCILE_PATH, config.DOCUMENSO_OWNER_RECIPIENT_ID ?? '', config.DOCUMENSO_BUYER_RECIPIENT_ID ?? ''))],
+    ['MONID', new MonidDiscoveryProvider({ baseUrl: config.MONID_API_BASE_URL, apiKey: config.MONID_API_KEY })],
+    ['OPENAI', new OpenAISalesProvider(config.OPENAI_API_KEY, config.OPENAI_MODEL)],
+  ])
+  return registry
+}
+
+export async function preflightProviders(registry = createProviderRegistry()): Promise<Array<{ provider: string; live: boolean }>> {
+  const config = getConfig()
+  if (config.PROVIDER_MODE === 'real' && config.TERAC_TRANSPORT !== 'http') throw new Error('The deployed Terac adapter requires TERAC_TRANSPORT=http')
+  if (config.PROVIDER_MODE === 'real' && config.BAND_AGENT_BRAIN !== 'CODEX') throw new Error('The judged Band worker requires BAND_AGENT_BRAIN=CODEX')
+  const results: Array<{ provider: string; live: boolean }> = []
+  for (const [name, provider] of registry) {
+    await provider.preflight()
+    results.push({ provider: name, live: provider.capabilities().live })
+  }
+  if (config.PROVIDER_MODE === 'real') {
+    const contractReview = new TeracContractReviewProvider({ baseUrl: config.TERAC_API_BASE_URL, apiKey: config.TERAC_API_KEY, path: config.TERAC_CONTRACT_REVIEW_PATH })
+    await contractReview.preflight()
+    results.push({ provider: 'TERAC_CONTRACT_REVIEW', live: true })
+    results.push({ provider: 'RENDER', live: Boolean(config.RENDER_API_KEY && config.RENDER_WORKFLOW_SLUG) })
+  }
+  return results
+}

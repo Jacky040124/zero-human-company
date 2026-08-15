@@ -10,6 +10,14 @@ import type { ReactNode } from 'react'
 import { cannedBuyerReply, factory, leads as seedLeads, makeThread, shortCompany } from '../data'
 import type { Lead } from '../data'
 import type { ThreadMessage } from '../data/thread'
+import type { DemoRunSnapshot, OpportunityStage } from '@zero-human/contracts'
+import {
+  activatePilot as activatePilotRequest,
+  decideCampaign as decideCampaignRequest,
+  getActiveRun,
+  loginOwner as loginOwnerRequest,
+  subscribeToRun,
+} from '../api/runtime'
 
 export type Activity = {
   id: number
@@ -129,6 +137,12 @@ type DemoState = {
   threads: Record<string, ThreadMessage[]>
   sendLeadMessage: (id: string, body: string) => void
   leadTyping: Record<string, boolean>
+  runtimeRun: DemoRunSnapshot | null
+  apiConnected: boolean
+  runtimeError: string | null
+  loginOwner: (email: string, password: string) => Promise<void>
+  activatePilot: () => Promise<void>
+  decideCampaign: (decision: 'APPROVE' | 'REJECT') => Promise<void>
 }
 
 const DemoContext = createContext<DemoState | null>(null)
@@ -149,6 +163,17 @@ function seedLeadThreads(list: Lead[]): Record<string, ThreadMessage[]> {
   return Object.fromEntries(list.map((lead) => [lead.id, makeThread(lead)]))
 }
 
+function runtimeStatus(stage: OpportunityStage): Lead['status'] {
+  if (stage === 'RESEARCHING') return 'sourcing'
+  if (stage === 'OUTREACH' || stage === 'ENGAGED') return 'contacted'
+  if (stage === 'NEGOTIATING') return 'negotiating'
+  return 'contract'
+}
+
+function countryCode(country: string): string {
+  return ({ Germany: 'DE', Netherlands: 'NL', France: 'FR', Norway: 'NO', Denmark: 'DK' } as Record<string, string>)[country] ?? 'EU'
+}
+
 export function DemoProvider({ children }: { children: ReactNode }) {
   const [leads, setLeads] = useState<Lead[]>(seedLeads)
   const [activity, setActivity] = useState<Activity[]>([
@@ -166,6 +191,9 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     seedAutonomy(seedLeads),
   )
   const [leadTyping, setLeadTyping] = useState<Record<string, boolean>>({})
+  const [runtimeRun, setRuntimeRun] = useState<DemoRunSnapshot | null>(null)
+  const [apiConnected, setApiConnected] = useState(false)
+  const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const eventIndex = useRef(0)
   const activityId = useRef(1)
   const replyTimers = useRef<ReturnType<typeof setTimeout>[]>([])
@@ -174,7 +202,51 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const msgSeq = useRef(0)
   leadsRef.current = leads
 
+  const applyRuntime = useCallback((snapshot: DemoRunSnapshot) => {
+    setRuntimeRun(snapshot)
+    setApiConnected(true)
+    setRuntimeError(null)
+    setLeads(snapshot.opportunities.map((opportunity) => ({
+      id: opportunity.id,
+      company: opportunity.company,
+      city: opportunity.country,
+      country: opportunity.country,
+      countryCode: countryCode(opportunity.country),
+      buyer: opportunity.contactName,
+      title: opportunity.contactName === 'Research only' ? 'Research candidate' : 'Consenting role-player',
+      focus: opportunity.focus,
+      status: runtimeStatus(opportunity.stage),
+      worker: opportunity.stage === 'PAUSED' ? 'Policy Reviewer' : 'Agent team',
+      lastAction: opportunity.stageReason ?? opportunity.stage.replaceAll('_', ' ').toLowerCase(),
+      containers: opportunity.company === 'Nordlicht Import GmbH' ? '2 × 40HQ' : 'n/a',
+      featured: opportunity.company === 'Nordlicht Import GmbH',
+    })))
+    setActivity(snapshot.timeline.slice(0, 8).map((event, index) => ({
+      id: event.sequence * 100 + index,
+      time: new Date(event.occurredAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      text: event.summary,
+    })))
+  }, [])
+
   useEffect(() => {
+    let cancelled = false
+    void getActiveRun()
+      .then((snapshot) => {
+        if (!cancelled && snapshot) applyRuntime(snapshot)
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setRuntimeError(error instanceof Error ? error.message : 'Runtime API unavailable')
+      })
+    return () => { cancelled = true }
+  }, [applyRuntime])
+
+  useEffect(() => {
+    if (!runtimeRun) return
+    return subscribeToRun(runtimeRun.id, applyRuntime, () => setRuntimeError('Live updates are reconnecting'))
+  }, [applyRuntime, runtimeRun?.id])
+
+  useEffect(() => {
+    if (apiConnected) return
     const timer = setInterval(() => {
       const event = scriptedEvents[eventIndex.current]
       if (!event) {
@@ -215,7 +287,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     }, 3500)
 
     return () => clearInterval(timer)
-  }, [])
+  }, [apiConnected])
 
   useEffect(() => {
     return () => {
@@ -226,6 +298,10 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const sendLeadMessage = useCallback((id: string, body: string) => {
     const trimmed = body.trim()
     if (!trimmed) return
+    if (apiConnected) {
+      setRuntimeError('Manual sends are disabled during an autonomous run.')
+      return
+    }
 
     const outboundId = `${id}-manual-${++msgSeq.current}`
     setThreads((current) => ({
@@ -264,7 +340,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       }
     }, 2500)
     replyTimers.current.push(timer)
-  }, [])
+  }, [apiConnected])
 
   const sendMessage = useCallback(
     (body: string) => {
@@ -276,6 +352,24 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const setLeadAutonomy = useCallback((id: string, value: boolean) => {
     setLeadAutonomyMap((current) => ({ ...current, [id]: value }))
   }, [])
+
+  const loginOwner = useCallback(async (email: string, password: string) => {
+    await loginOwnerRequest(email, password)
+    setRuntimeError(null)
+  }, [])
+
+  const activatePilot = useCallback(async () => {
+    if (!runtimeRun) throw new Error('No active run')
+    const checkoutUrl = await activatePilotRequest(runtimeRun.id)
+    window.location.assign(checkoutUrl)
+  }, [runtimeRun])
+
+  const decideCampaign = useCallback(async (decision: 'APPROVE' | 'REJECT') => {
+    if (!runtimeRun) throw new Error('No active run')
+    await decideCampaignRequest(runtimeRun.id, decision)
+    const snapshot = await getActiveRun()
+    if (snapshot) applyRuntime(snapshot)
+  }, [applyRuntime, runtimeRun])
 
   const thread = threads.nordlicht ?? []
   const buyerTyping = Boolean(leadTyping.nordlicht)
@@ -297,6 +391,12 @@ export function DemoProvider({ children }: { children: ReactNode }) {
         threads,
         sendLeadMessage,
         leadTyping,
+        runtimeRun,
+        apiConnected,
+        runtimeError,
+        loginOwner,
+        activatePilot,
+        decideCampaign,
       }}
     >
       {children}

@@ -6,12 +6,14 @@ import { useDemo } from '../../state/DemoContext'
 
 export function LeadDetail() {
   const { id } = useParams()
-  const lead = getLead(id ?? 'nordlicht')
-  const isFeatured = lead.id === 'nordlicht'
-  const { thread, sendMessage, buyerTyping } = useDemo()
+  const { leads, thread, sendMessage, buyerTyping, apiConnected } = useDemo()
+  const lead = leads.find((item) => item.id === id) ?? getLead(id ?? 'nordlicht')
+  const isFeatured = Boolean(lead.featured)
   const [draft, setDraft] = useState('')
 
-  const messages = isFeatured
+  const messages = apiConnected
+    ? [{ id: 'runtime', from: lead.worker, role: 'quay' as const, time: 'Live', body: lead.lastAction }]
+    : isFeatured
     ? thread
     : [
         {
@@ -75,7 +77,7 @@ export function LeadDetail() {
             ) : null}
           </div>
 
-          {isFeatured ? (
+          {isFeatured && !apiConnected ? (
             <div className="mt-5 flex gap-2 border-t border-line pt-4">
               <input
                 value={draft}

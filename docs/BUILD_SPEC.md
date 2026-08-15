@@ -1,6 +1,6 @@
-# Autonomous Lead-Following System — Backend Build Spec (v2, lightweight)
+# Autonomous Lead-Following System — Build Spec (v3, implementation baseline)
 
-Status: **approved to start** — foundations locked, remaining decisions are explicit "ask-before-implementing" checkpoints (not pre-answered). Backend only; Jacky owns the frontend. Build with the coding agent and ask the checkpoint questions when you reach them.
+Status: **implemented locally** — foundations and integration decisions are locked. Real provider credentials, account-specific paths, Render provisioning, and the judged run remain operational setup.
 
 Zero Human Company Hackathon (Terac), Aug 15, SF.
 
@@ -23,7 +23,7 @@ The demo is judged on the rubric below; a sponsor claim only counts if one judge
 | Prize | Proof (carries `demoRunId`) |
 |---|---|
 | Terac (MANDATORY) | `HumanStudy`: real human baseline-vs-selected delta |
-| Agent-Run Company | `Payment`: live-mode Stripe `checkout.session.completed` |
+| Agent-Run Company | `Payment`: signed Stripe test-mode `checkout.session.completed` with an explicit provider mode |
 | Linq | `Message` w/ Linq event id |
 | Band | `AgentHandoff` w/ Band room id + schema-valid verdict |
 | Render | `WorkflowRun` w/ Render run id + fail-once retry |
@@ -47,7 +47,7 @@ Campaign  1—* Opportunity
 - `ProviderAction` (transactional outbox) — created **before** a side effect, unique on internal `idempotencyKey`, states `PLANNED|RUNNING|SUCCEEDED|FAILED`, attempts, provider external id, redacted response.
 - One DB txn updates state + appends `Event` (monotonic per-Opportunity `sequence`) + creates the `ProviderAction`. A worker claims the action and passes the idempotency key to the provider. Add `Opportunity.version` optimistic lock so concurrent callbacks can't double-advance. This is what makes Render retries safe.
 
-**(4) Every external service behind an interface** — `ProviderPort` (send + capabilities), `WorkflowPort` (Local for skeleton/CI, Render for judged), `ModelProvider` (OpenAI baseline; Pioneer optional, never removed as fallback), `PolicyEngine` (pure). The coding agent implements fakes first, then asks the checkpoint questions (below) before wiring each real provider.
+**(4) Every external service behind an interface** — `ProviderPort` (send + capabilities), Render Workflows for judged execution, OpenAI Responses API with `gpt-5.6-luna` for sales copy, three external Band identities backed by persistent Codex SDK threads on `gpt-5.6-sol`, and a pure local `PolicyEngine`.
 
 Minimal seed: toy Offer, one Campaign + baseline revision, 5 buyers, 2 contacts, recipient allowlist.
 
@@ -60,27 +60,27 @@ Minimal seed: toy Offer, one Campaign + baseline revision, 5 buyers, 2 contacts,
 3. Real providers one at a time behind their ports, each gated by an ask-before-implementing checkpoint.
 4. Harden: `demo:verify --run-id` (fails unless one run has every real proof), kill switch, run 3× clean.
 
-Scripts: `pnpm check | db:reset | demo:seed | demo:run | judge:preflight | demo:verify --run-id <id>`.
+Scripts: `npm run check | db:reset | demo:seed | demo:run | judge:preflight | demo:verify -- --run-id <id>`.
 Modes: `JUDGE_MODE=true` requires real config + provider preflight (incl. Linq/Monid) and rejects local engine + fakes; `REAL_ACTIONS_ENABLED=true` limits side effects to the consenting-recipient allowlist. Never message addresses from real buyer research — outbound goes to allowlisted demo role-players.
 
 ---
 
-## 4. Ask-before-implementing checkpoints (decide with chalk/team at integration time)
+## 4. Locked integration decisions
 
-Do NOT hard-code these now — surface them as questions when you reach each integration:
-- **Band topology:** platform agents (Render workflow creates room, polls until schema-valid `NegotiationVerdict`) vs a persistent `band-gateway` SDK/WebSocket worker. MCP alone can't receive agent replies. Pick one before writing Band code.
-- **Terac:** transport (MCP vs HTTP), study shape (recommended: one blind comparative study rating baseline + candidates on the same clarity/trust/relevance rubric; activate the human-selected winner after owner approval), and that human latency can't block the 3-min demo (launch early, show stored authenticated result).
-- **Owner auth:** seeded owner + signed HTTP-only session, or static bearer token (no unauthenticated mutations).
-- **API naming / DTOs:** confirm route names + the timeline DTO (`sequence, type, status, sanitized summary, actor, occurredAt, proofRef`); emit an OpenAPI doc for the frontend.
-- **Stripe:** live-mode Payment Link + `client_reference_id=<pilotActivationId>`, raw-body signature, `checkout.session.completed`, store `stripeEventId/checkoutSessionId/paymentIntentId/livemode/amount/currency`.
-- **Monid:** confirm runtime vs **pre-run import** (recommended: operator runs `monid discover/inspect/run` for demo queries and seeds real Monid run/provider ids into `Company.monidProviderId`; this runtime has no autonomous Render-side key by default). Don't claim autonomous runtime discovery unless provisioned.
-- **Provider accounts (human, not code):** Stripe live acct + Payment Link, Terac study access, Band agents, Linq number + webhook, Documenso account + template + webhook secret, Render Workflows enabled + task slugs. Each yields a non-secret id + a preflight check.
+- **Band topology:** External Researcher, Negotiator, and Policy Reviewer identities connect to Band from one single-instance Render worker. A named Render task creates an idempotent room, explicitly mentions the Researcher, and polls for a Policy Reviewer-authored verdict. Each role has a separate persistent Codex SDK thread on GPT-5.6 Sol; the local price policy remains authoritative.
+- **Terac:** two real tasks: baseline plus two campaign candidates on clarity/trust/relevance, and a German-law contract review. Account-specific HTTP paths are configuration, not guessed constants.
+- **Owner auth:** seeded owner credentials create a signed, secure, HTTP-only, same-site cookie.
+- **API:** REST snapshot plus SSE updates, shared Zod DTOs, and an OpenAPI surface at `/api/v1/openapi.json`.
+- **Stripe:** a real test-mode Checkout Session for exactly $5 USD. Only a signed, matching Stripe webhook marks the pilot paid; in-memory/fake provider data never qualifies.
+- **Monid:** runtime discovery on Render. Results are permanently marked research-only and are never promoted into outbound recipients.
+- **Render:** same-origin web/API plus Postgres, and a separate Workflow service registering named TypeScript tasks. The fail-once task proves managed retry without duplicate side effects.
+- **Documenso:** template-backed sequential envelope, owner first and consenting buyer role-player second.
 
 ---
 
 ## 5. Definition of done (core)
 
-Fresh env seeds from one command; two owner approvals only; **real human-measured Terac delta** stored; **real live Stripe payment → PilotActivation PAID**; Band verdict gates negotiation; policy visibly blocks an unsafe action; all signatures → Signed once; judged run on Render with a real `WorkflowRun` + fail-once retry; `demo:verify --run-id` passes on one run; four negative tests pass (remove Terac → revision can't activate; remove Band verdict → negotiation can't start; replay Stripe webhook → no duplicate revenue; fail a Render task → retry no duplicate side effect). Pioneer/Fastino is optional and NOT in this DoD.
+Fresh env seeds from one command; two recorded owner approvals only; **real human-measured Terac delta** and **real German-law Terac review** stored; **signed Stripe sandbox payment → PilotActivation PAID**; Band verdict gates negotiation; policy visibly blocks an unsafe action; all signatures → Signed once; judged run on Render with a real `WorkflowRun` + fail-once retry; `demo:verify -- --run-id` passes on one run; and the negative idempotency/state tests pass.
 
 ---
 

@@ -16,10 +16,10 @@ export function AppShell() {
   const liveWorkers = leads.filter((lead) => lead.status !== 'contract').length
 
   return (
-    <div className="flex min-h-svh bg-bg">
-      <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-sidebar px-3 py-4">
+    <div className="flex min-h-svh flex-col bg-bg md:flex-row">
+      <aside className="sticky top-0 z-40 flex w-full shrink-0 items-center gap-4 border-b border-line bg-sidebar px-3 py-3 md:static md:w-56 md:flex-col md:items-stretch md:border-b-0 md:border-r md:py-4">
         <Logo to="/app/dashboard" />
-        <nav className="mt-6 flex flex-col gap-0.5">
+        <nav className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto md:mt-6 md:flex-none md:flex-col">
           {nav.map((item) => (
             <NavLink
               key={item.to}
@@ -36,7 +36,7 @@ export function AppShell() {
             </NavLink>
           ))}
         </nav>
-        <div className="mt-auto rounded-md border border-line px-3 py-3">
+        <div className="mt-auto hidden rounded-md border border-line px-3 py-3 md:block">
           <p className="text-xs text-muted">Sources in use</p>
           <p className="mt-1 text-sm leading-snug text-ink">
             LinkedIn, Maps, customs, directories, showrooms…
@@ -45,7 +45,7 @@ export function AppShell() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-line bg-bg px-6 py-3">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-bg px-4 py-3 sm:px-6">
           <div>
             <p className="text-sm font-medium text-ink">
               {factory.name}{' '}
@@ -74,7 +74,7 @@ export function AppShell() {
             <StatusPill>{liveWorkers} workers live</StatusPill>
           </div>
         </header>
-        <main className="min-w-0 flex-1 overflow-auto p-6">
+        <main className="min-w-0 flex-1 overflow-auto p-4 sm:p-6">
           <Outlet />
         </main>
       </div>

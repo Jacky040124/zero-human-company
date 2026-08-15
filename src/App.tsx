@@ -1,24 +1,27 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { DemoProvider } from './state/DemoContext'
-import { Landing } from './pages/Landing'
-import { Access } from './pages/onboarding/Access'
-import { Audience } from './pages/onboarding/Audience'
-import { Catalog } from './pages/onboarding/Catalog'
-import { Offer } from './pages/onboarding/Offer'
-import { Outreach } from './pages/onboarding/Outreach'
-import { AppShell } from './pages/app/AppShell'
-import { Buyers } from './pages/app/Buyers'
-import { CatalogView } from './pages/app/CatalogView'
-import { Contract } from './pages/app/Contract'
-import { ContractsList } from './pages/app/ContractsList'
-import { Dashboard } from './pages/app/Dashboard'
-import { LeadDetail } from './pages/app/LeadDetail'
-import { BobbyLab } from './pages/BobbyLab'
+
+const Landing = lazy(() => import('./pages/Landing').then(({ Landing }) => ({ default: Landing })))
+const Access = lazy(() => import('./pages/onboarding/Access').then(({ Access }) => ({ default: Access })))
+const Audience = lazy(() => import('./pages/onboarding/Audience').then(({ Audience }) => ({ default: Audience })))
+const Catalog = lazy(() => import('./pages/onboarding/Catalog').then(({ Catalog }) => ({ default: Catalog })))
+const Offer = lazy(() => import('./pages/onboarding/Offer').then(({ Offer }) => ({ default: Offer })))
+const Outreach = lazy(() => import('./pages/onboarding/Outreach').then(({ Outreach }) => ({ default: Outreach })))
+const AppShell = lazy(() => import('./pages/app/AppShell').then(({ AppShell }) => ({ default: AppShell })))
+const Buyers = lazy(() => import('./pages/app/Buyers').then(({ Buyers }) => ({ default: Buyers })))
+const CatalogView = lazy(() => import('./pages/app/CatalogView').then(({ CatalogView }) => ({ default: CatalogView })))
+const Contract = lazy(() => import('./pages/app/Contract').then(({ Contract }) => ({ default: Contract })))
+const ContractsList = lazy(() => import('./pages/app/ContractsList').then(({ ContractsList }) => ({ default: ContractsList })))
+const Dashboard = lazy(() => import('./pages/app/Dashboard').then(({ Dashboard }) => ({ default: Dashboard })))
+const LeadDetail = lazy(() => import('./pages/app/LeadDetail').then(({ LeadDetail }) => ({ default: LeadDetail })))
+const BobbyLab = lazy(() => import('./pages/BobbyLab').then(({ BobbyLab }) => ({ default: BobbyLab })))
 
 export default function App() {
   return (
     <BrowserRouter>
       <DemoProvider>
+        <Suspense fallback={<div className="grid min-h-screen place-items-center bg-canvas text-sm text-muted">Opening the company…</div>}>
         <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/bobby-lab" element={<BobbyLab />} />
@@ -38,6 +41,7 @@ export default function App() {
         </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </DemoProvider>
     </BrowserRouter>
   )
