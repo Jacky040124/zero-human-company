@@ -21,12 +21,19 @@ export type ProviderRequest<T> = {
   payload: T
 }
 
+export type ProviderReconcileContext<T> = ProviderRequest<T> & {
+  externalHint?: string
+}
+
 export interface ProviderPort<TRequest, TResponse = Record<string, unknown>> {
   readonly provider: Provider
   capabilities(): ProviderCapabilities
   preflight(): Promise<void>
   execute(request: ProviderRequest<TRequest>): Promise<ProviderResult<TResponse>>
-  reconcile?(idempotencyKey: string): Promise<ProviderResult<TResponse> | null>
+  reconcile?(
+    idempotencyKey: string,
+    context?: ProviderReconcileContext<TRequest>,
+  ): Promise<ProviderResult<TResponse> | null>
 }
 
 export class ProviderConfigurationError extends Error {

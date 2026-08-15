@@ -4,6 +4,7 @@ import { createDemoRun, getDemoRunSnapshot, latestDemoRunId } from './domain/dem
 import { runFakeRehearsal } from './domain/fake-run.js'
 import { verifyDemoRun } from './domain/verify.js'
 import { createProviderRegistry, preflightProviders } from './providers/registry.js'
+import { reconcilePendingRenderTaskRuns } from './workflows/render-client.js'
 
 function option(name: string): string | undefined {
   const index = process.argv.indexOf(name)
@@ -45,6 +46,7 @@ async function main() {
   if (command === 'verify') {
     const id = option('--run-id') ?? await latestDemoRunId()
     if (!id) throw new Error('No demo run found; pass --run-id')
+    await reconcilePendingRenderTaskRuns(id)
     const report = await verifyDemoRun(id)
     console.log(JSON.stringify(report, null, 2))
     if (!report.passed) process.exitCode = 1

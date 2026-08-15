@@ -1,5 +1,6 @@
 import { ThenvoiLink } from '@band-ai/sdk'
 import type { AgentIdentity, PlatformChatMessage } from '@band-ai/sdk/rest'
+import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import {
   ProviderOutcomeUnknownError,
@@ -7,6 +8,7 @@ import {
   sanitizedExternalId,
   type ProviderCapabilities,
   type ProviderPort,
+  type ProviderReconcileContext,
   type ProviderRequest,
   type ProviderResult,
 } from '../types.js'
@@ -33,6 +35,13 @@ export type BandNegotiationRequest = {
   askingPrice?: number
   localPolicy: string
 }
+
+const bandNegotiationRequestSchema = z.object({
+  brief: z.string(),
+  currency: z.string(),
+  askingPrice: z.number().optional(),
+  localPolicy: z.string(),
+})
 
 export const bandNegotiationResultSchema = z.object({
   roomId: z.string().min(1),
@@ -78,7 +87,8 @@ export type BandChat = {
 
 export interface BandExternalCoordinator {
   getIdentity(agentId: string): Promise<AgentIdentity>
-  createChat(taskId: string): Promise<{ id: string }>
+  createChat(): Promise<{ id: string }>
+  listParticipants(chatId: string): Promise<Array<{ id: string }>>
   addParticipant(chatId: string, participantId: string, role: 'member'): Promise<void>
   sendMessage(chatId: string, content: string, mentions: BandMention[]): Promise<{ id: string | null }>
   getChatContext(chatId: string): Promise<PlatformChatMessage[]>
@@ -86,6 +96,14 @@ export interface BandExternalCoordinator {
 }
 
 type BandSleep = (milliseconds: number) => Promise<void>
+
+export function stableBandOperationId(idempotencyKey: string): string {
+  return createHash('sha256').update(`zero-human-company:band:${idempotencyKey}`).digest('hex').slice(0, 32)
+}
+
+const operationMarker = (operationId: string) => `ZHC_OPERATION_ID:${operationId}`
+const briefMarker = (operationId: string) => `ZHC_BRIEF_ID:${operationId}`
+const markerMessage = (operationId: string) => `Internal reconciliation marker: ${operationMarker(operationId)}.`
 
 function apiKeyFor(config: BandConfig, agentId: string): string {
   if (agentId === config.negotiatorAgentId) return config.negotiatorApiKey ?? config.apiKey ?? ''
@@ -124,8 +142,14 @@ export class ThenvoiExternalCoordinator implements BandExternalCoordinator {
     return identity
   }
 
-  async createChat(taskId: string): Promise<{ id: string }> {
-    return this.negotiator().rest.createChat(taskId)
+  async createChat(): Promise<{ id: string }> {
+    // Band's optional task_id references an existing Band Task resource. Our
+    // workflow idempotency key is instead persisted as a sanitized chat marker.
+    return this.negotiator().rest.createChat()
+  }
+
+  async listParticipants(chatId: string): Promise<Array<{ id: string }>> {
+    return this.negotiator().rest.listChatParticipants(chatId)
   }
 
   async addParticipant(chatId: string, participantId: string, role: 'member'): Promise<void> {
@@ -142,9 +166,21 @@ export class ThenvoiExternalCoordinator implements BandExternalCoordinator {
   }
 
   async getChatContext(chatId: string): Promise<PlatformChatMessage[]> {
-    const getChatContext = this.negotiator().rest.getChatContext
+    const rest = this.negotiator().rest
+    const getChatContext = rest.getChatContext
     if (!getChatContext) throw new Error('Band SDK REST context hydration is unavailable')
-    return (await getChatContext({ chatId, page: 1, pageSize: 100 })).data
+    const messages: PlatformChatMessage[] = []
+    const pageSize = 100
+    const maxPages = 20
+    for (let page = 1; page <= maxPages; page += 1) {
+      const response = await getChatContext.call(rest, { chatId, page, pageSize })
+      messages.push(...response.data)
+      const totalPages = response.metadata?.totalPages
+      if (typeof totalPages === 'number' ? page >= totalPages : response.data.length < pageSize) {
+        return messages
+      }
+    }
+    throw new Error(`Band chat context exceeded the safe pagination limit of ${maxPages * pageSize} messages`)
   }
 
   async listChats(): Promise<BandChat[]> {
@@ -177,13 +213,22 @@ export function validateNegotiationVerdict(value: unknown): NegotiationVerdict {
   return negotiationVerdictSchema.parse(value)
 }
 
+function policyVerdictJson(content: string): string | null {
+  // Band persists structured mentions as leading @[[participant-id]] tokens.
+  // They are delivery metadata, not part of the policy-authored payload.
+  const normalized = content.replace(/^(?:@\[\[[^\]\r\n]{1,256}\]\]\s*)+/, '').trimStart()
+  if (!normalized.startsWith(BAND_VERDICT_PREFIX)) return null
+  return normalized.slice(BAND_VERDICT_PREFIX.length).trim().replace(/^:\s*/, '')
+}
+
 export function parsePolicyVerdict(
   messages: readonly PlatformChatMessage[],
   policyAgentId: string,
 ): NegotiationVerdict | null {
   for (const message of [...messages].reverse()) {
-    if (message.sender_id !== policyAgentId || !message.content.startsWith(BAND_VERDICT_PREFIX)) continue
-    const json = message.content.slice(BAND_VERDICT_PREFIX.length).trim().replace(/^:\s*/, '')
+    if (message.sender_id !== policyAgentId) continue
+    const json = policyVerdictJson(message.content)
+    if (json === null) continue
     try {
       const parsed = negotiationVerdictSchema.safeParse(JSON.parse(json))
       if (parsed.success) return parsed.data
@@ -238,8 +283,9 @@ function completedPolicyOutcome(
   const ordered = orderedMessages(messages)
   for (let policyIndex = ordered.length - 1; policyIndex >= 0; policyIndex -= 1) {
     const message = ordered[policyIndex]
-    if (!message || message.sender_id !== agentIds.policyReviewer || !message.content.startsWith(BAND_VERDICT_PREFIX)) continue
-    const json = message.content.slice(BAND_VERDICT_PREFIX.length).trim().replace(/^:\s*/, '')
+    if (!message || message.sender_id !== agentIds.policyReviewer) continue
+    const json = policyVerdictJson(message.content)
+    if (json === null) continue
     let parsedJson: unknown
     try {
       parsedJson = JSON.parse(json)
@@ -279,12 +325,14 @@ function negotiationBrief(
   payload: BandNegotiationRequest,
   researcher: AgentIdentity,
   policy: AgentIdentity,
+  operationId: string,
 ): string {
   const currency = sanitizeBandPersistedText(payload.currency, 16)
   const sellerContext = payload.askingPrice === undefined
     ? ''
     : `\nNegotiation price context: ${currency} ${payload.askingPrice}.`
   return [
+    `Internal brief marker: ${briefMarker(operationId)}.`,
     `${mentionLabel(researcher)} research the negotiation context, then explicitly hand the evidence to the Negotiator.`,
     `${policy.name} must receive the Negotiator's proposal before independently enforcing the local policy and publishing the final verdict.`,
     `Brief: ${sanitizeBandPersistedText(payload.brief)}`,
@@ -347,33 +395,111 @@ export class BandExternalAgentProvider implements ProviderPort<BandNegotiationRe
     await this.preflight()
     const researcher = await this.coordinator.getIdentity(this.config.researcherAgentId as string)
     const policy = await this.coordinator.getIdentity(this.config.policyReviewerAgentId as string)
-    let chatId: string | null = null
+    const operationId = stableBandOperationId(request.idempotencyKey)
+    let chatId: string
     try {
-      chatId = (await this.coordinator.createChat(request.idempotencyKey)).id
-      await this.coordinator.addParticipant(chatId, researcher.id, 'member')
-      await this.coordinator.addParticipant(chatId, policy.id, 'member')
-      const sent = await this.coordinator.sendMessage(
-        chatId,
-        negotiationBrief(request.payload, researcher, policy),
-        [mention(researcher)],
-      )
-      const outcome = await this.pollForVerdict(chatId)
-      return this.result(chatId, sent.id, outcome)
+      chatId = (await this.coordinator.createChat()).id
+    } catch (error) {
+      // A create response can be lost after Band accepted it. Until a message
+      // is written the room is an empty orphan, so retrying is safe.
+      throw error
+    }
+    try {
+      await this.coordinator.sendMessage(chatId, markerMessage(operationId), [])
+      return await this.resumeChat(chatId, request.payload, researcher, policy, operationId)
     } catch (error) {
       if (error instanceof ProviderOutcomeUnknownError) throw error
       throw new ProviderOutcomeUnknownError(
-        'Band external-agent coordination outcome is unknown; reconcile by stable task ID before retrying',
-        chatId ?? request.idempotencyKey,
+        'Band external-agent coordination outcome is unknown; reconcile by stable operation marker before retrying',
+        chatId,
       )
     }
   }
 
-  async reconcile(idempotencyKey: string): Promise<ProviderResult<BandNegotiationResult> | null> {
+  async reconcile(
+    idempotencyKey: string,
+    context?: ProviderReconcileContext<BandNegotiationRequest>,
+  ): Promise<ProviderResult<BandNegotiationResult> | null> {
     await this.preflight()
-    const chat = (await this.coordinator.listChats()).find((candidate) => candidate.taskId === idempotencyKey)
+    const operationId = stableBandOperationId(idempotencyKey)
+    const marker = operationMarker(operationId)
+    const negotiatorId = this.config.negotiatorAgentId as string
+    const chats = await this.coordinator.listChats()
+    const contexts = new Map<string, PlatformChatMessage[]>()
+    const markedChats: BandChat[] = []
+    for (const chat of chats) {
+      const messages = await this.coordinator.getChatContext(chat.id)
+      contexts.set(chat.id, messages)
+      if (messages.some((message) => message.sender_id === negotiatorId
+        && message.message_type === 'text'
+        && message.content.includes(marker))) markedChats.push(chat)
+    }
+    if (markedChats.length > 1) {
+      throw new ProviderOutcomeUnknownError('Band reconciliation found multiple rooms for one operation marker')
+    }
+
+    let chat = markedChats[0]
+    if (!chat && context?.externalHint) {
+      const hintedId = context.externalHint.replace(/^band:/i, '')
+      const hintedChat = chats.find((candidate) => candidate.id === hintedId)
+      if (!hintedChat) return null
+      chat = hintedChat
+      await this.coordinator.sendMessage(chat.id, markerMessage(operationId), [])
+      contexts.set(chat.id, await this.coordinator.getChatContext(chat.id))
+    }
     if (!chat) return null
-    const outcome = await this.pollForVerdict(chat.id)
-    return this.result(chat.id, null, outcome)
+
+    const messages = contexts.get(chat.id) ?? await this.coordinator.getChatContext(chat.id)
+    const outcome = completedPolicyOutcome(messages, this.agentIds())
+    const knownBrief = this.briefMessage(messages, operationId)
+    if (outcome) return this.result(chat.id, knownBrief?.id ?? null, outcome)
+    const payload = bandNegotiationRequestSchema.safeParse(context?.payload)
+    if (!payload.success) {
+      throw new ProviderOutcomeUnknownError('Band reconciliation needs the original negotiation request', chat.id)
+    }
+    const researcher = await this.coordinator.getIdentity(this.config.researcherAgentId as string)
+    const policy = await this.coordinator.getIdentity(this.config.policyReviewerAgentId as string)
+    return this.resumeChat(chat.id, payload.data, researcher, policy, operationId)
+  }
+
+  private async resumeChat(
+    chatId: string,
+    payload: BandNegotiationRequest,
+    researcher: AgentIdentity,
+    policy: AgentIdentity,
+    operationId: string,
+  ): Promise<ProviderResult<BandNegotiationResult>> {
+    const participants = await this.coordinator.listParticipants(chatId)
+    const participantIds = new Set(participants.map((participant) => participant.id))
+    if (!participantIds.has(researcher.id)) {
+      await this.coordinator.addParticipant(chatId, researcher.id, 'member')
+    }
+    if (!participantIds.has(policy.id)) {
+      await this.coordinator.addParticipant(chatId, policy.id, 'member')
+    }
+
+    const messages = await this.coordinator.getChatContext(chatId)
+    let brief = this.briefMessage(messages, operationId)
+    if (!brief) {
+      const sent = await this.coordinator.sendMessage(
+        chatId,
+        negotiationBrief(payload, researcher, policy, operationId),
+        [mention(researcher)],
+      )
+      brief = sent.id ? { id: sent.id } : null
+    }
+    const outcome = completedPolicyOutcome(messages, this.agentIds()) ?? await this.pollForVerdict(chatId)
+    return this.result(chatId, brief?.id ?? null, outcome)
+  }
+
+  private briefMessage(
+    messages: readonly PlatformChatMessage[],
+    operationId: string,
+  ): Pick<PlatformChatMessage, 'id'> | null {
+    const negotiatorId = this.config.negotiatorAgentId as string
+    return messages.find((message) => message.sender_id === negotiatorId
+      && message.message_type === 'text'
+      && message.content.includes(briefMarker(operationId))) ?? null
   }
 
   private async pollForVerdict(chatId: string): Promise<{
@@ -387,11 +513,7 @@ export class BandExternalAgentProvider implements ProviderPort<BandNegotiationRe
 
     while (elapsedMs <= maxPollDurationMs) {
       const messages = await this.coordinator.getChatContext(chatId)
-      const outcome = completedPolicyOutcome(messages, {
-        researcher: this.config.researcherAgentId as string,
-        negotiator: this.config.negotiatorAgentId as string,
-        policyReviewer: this.config.policyReviewerAgentId as string,
-      })
+      const outcome = completedPolicyOutcome(messages, this.agentIds())
       if (outcome) return outcome
       if (elapsedMs === maxPollDurationMs) break
       const waitMs = Math.min(pollIntervalMs, maxPollDurationMs - elapsedMs)
@@ -410,11 +532,7 @@ export class BandExternalAgentProvider implements ProviderPort<BandNegotiationRe
     briefMessageId: string | null,
     outcome: { verdict: NegotiationVerdict; model: string | null; runtime: string | null },
   ): ProviderResult<BandNegotiationResult> {
-    const externalAgentIds = {
-      negotiator: this.config.negotiatorAgentId as string,
-      researcher: this.config.researcherAgentId as string,
-      policyReviewer: this.config.policyReviewerAgentId as string,
-    }
+    const externalAgentIds = this.agentIds()
     return {
       provider: this.provider,
       externalId: sanitizedExternalId(this.provider, chatId),
@@ -437,6 +555,14 @@ export class BandExternalAgentProvider implements ProviderPort<BandNegotiationRe
         runtime: outcome.runtime,
         localPolicyAuthoritative: true,
       },
+    }
+  }
+
+  private agentIds(): { negotiator: string; researcher: string; policyReviewer: string } {
+    return {
+      negotiator: this.config.negotiatorAgentId as string,
+      researcher: this.config.researcherAgentId as string,
+      policyReviewer: this.config.policyReviewerAgentId as string,
     }
   }
 }

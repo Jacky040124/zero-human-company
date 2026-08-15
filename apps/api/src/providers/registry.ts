@@ -5,7 +5,7 @@ import { DocumensoProvider } from './documenso/index.js'
 import { FakeProvider } from './fake.js'
 import { LinqMessageProvider } from './linq/index.js'
 import { FakeMonidDiscoveryProvider, MonidDiscoveryProvider } from './monid/index.js'
-import { OpenAISalesProvider } from './openai.js'
+import { OpenRouterSalesProvider } from './openai.js'
 import { standardDocumensoCodec, standardTeracCodec } from './standard-codecs.js'
 import { StripeCheckoutProvider } from './stripe/index.js'
 import { FakeTeracProvider, TeracProvider } from './terac/index.js'
@@ -48,7 +48,11 @@ export function createProviderRegistry(): ProviderRegistry {
     })],
     ['DOCUMENSO', new DocumensoProvider({ baseUrl: config.DOCUMENSO_API_BASE_URL, apiKey: config.DOCUMENSO_API_KEY, templateId: config.DOCUMENSO_TEMPLATE_ID }, standardDocumensoCodec(config.DOCUMENSO_CREATE_PATH, config.DOCUMENSO_RECONCILE_PATH, config.DOCUMENSO_OWNER_RECIPIENT_ID ?? '', config.DOCUMENSO_BUYER_RECIPIENT_ID ?? ''))],
     ['MONID', new MonidDiscoveryProvider({ baseUrl: config.MONID_API_BASE_URL, apiKey: config.MONID_API_KEY })],
-    ['OPENAI', new OpenAISalesProvider(config.OPENAI_API_KEY, config.OPENAI_MODEL)],
+    ['OPENAI', new OpenRouterSalesProvider(
+      config.OPENROUTER_API_KEY,
+      config.OPENROUTER_MODEL,
+      config.OPENROUTER_BASE_URL,
+    )],
   ])
   return registry
 }

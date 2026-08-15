@@ -65,6 +65,9 @@ export async function dispatchProviderAction(actionId: string, providers: Provid
       data: {
         status: unknown ? ProviderActionStatus.RECONCILE_REQUIRED : ProviderActionStatus.FAILED,
         lastError: error instanceof Error ? error.message : 'Unknown provider error',
+        ...(unknown && error.externalHint
+          ? { providerExternalId: error.externalHint.slice(0, 255) }
+          : {}),
       },
     })
     if (unknown) throw new ProviderReconciliationPendingError(action.id)
@@ -94,7 +97,12 @@ export async function reconcileProviderAction(actionId: string, providers: Provi
   if (action.status !== ProviderActionStatus.RECONCILE_REQUIRED) return null
   const provider = providers.get(action.provider)
   if (!provider?.reconcile) return null
-  const result = await provider.reconcile(action.idempotencyKey)
+  const result = await provider.reconcile(action.idempotencyKey, {
+    demoRunId: action.demoRunId,
+    idempotencyKey: action.idempotencyKey,
+    payload: action.request as unknown,
+    ...(action.providerExternalId ? { externalHint: action.providerExternalId } : {}),
+  })
   if (!result) return null
   await db.providerAction.update({
     where: { id: action.id },

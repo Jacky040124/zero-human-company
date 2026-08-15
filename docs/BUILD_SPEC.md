@@ -47,7 +47,7 @@ Campaign  1—* Opportunity
 - `ProviderAction` (transactional outbox) — created **before** a side effect, unique on internal `idempotencyKey`, states `PLANNED|RUNNING|SUCCEEDED|FAILED`, attempts, provider external id, redacted response.
 - One DB txn updates state + appends `Event` (monotonic per-Opportunity `sequence`) + creates the `ProviderAction`. A worker claims the action and passes the idempotency key to the provider. Add `Opportunity.version` optimistic lock so concurrent callbacks can't double-advance. This is what makes Render retries safe.
 
-**(4) Every external service behind an interface** — `ProviderPort` (send + capabilities), Render Workflows for judged execution, OpenAI Responses API with `gpt-5.6-luna` for sales copy, three external Band identities backed by persistent Codex SDK threads on `gpt-5.6-sol`, and a pure local `PolicyEngine`.
+**(4) Every external service behind an interface** — `ProviderPort` (send + capabilities), Render Workflows for judged execution, OpenRouter-routed `openai/gpt-5.6-luna` with structured output for sales copy, three external Band identities backed by persistent Codex SDK threads on `gpt-5.6-sol`, and a pure local `PolicyEngine`.
 
 Minimal seed: toy Offer, one Campaign + baseline revision, 5 buyers, 2 contacts, recipient allowlist.
 

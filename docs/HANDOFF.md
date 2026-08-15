@@ -7,11 +7,11 @@ This document is for Jackie and the next coding agent. It describes the publishe
 There are two active lines of work in Daniel's fork:
 
 - **Newer frontend:** `main` at `bc9b9e4` (`Polish the demo for judges: simulate onboarding steps and simplify the app area.`).
-- **Backend and first integration seam:** `agent/wip-backend-integration-20260815`. The foundation code is commit `17a272d`; use the branch head so this handoff is included too.
+- **Backend and first integration seam:** `agent/wip-backend-integration-20260815`. Use the branch head; it includes the original foundation, Render/Band hardening, immutable Band-role routing, and the latest reconciliation and OpenRouter work described below.
 
 Repository: <https://github.com/DanielOu1208/zero-human-company>
 
-The backend branch is deliberately unfinished. It was pushed to a fork because Daniel's account has read-only access to `Jacky040124/zero-human-company`. Do not push it directly over Jackie's branch or `main`.
+The backend branch is deliberately unfinished. Daniel now has direct access to `Jacky040124/zero-human-company`, but this handoff branch intentionally remains in Daniel's fork while Jackie's agent continues its work. Do not push it directly over Jackie's branch or either repository's `main`.
 
 ## Safe integration procedure
 
@@ -69,6 +69,17 @@ Shared Zod contracts (packages/contracts)
 
 During local development, Vite proxies `/api` and `/webhooks` to Fastify on port `3001`. In production, Fastify serves the built Vite application and the API from the same origin.
 
+### Changes since the first handoff
+
+- Render and the external Band worker were hardened for production dependency installation, persistent Codex authentication, isolated agent workspaces, and strict same-run proof verification.
+- Band roles are routed by configured immutable agent IDs rather than display names.
+- Band negotiation now uses a deterministic hashed operation marker instead of passing an internal idempotency key as a Band task ID. Reconciliation can recover the room, restore missing participants, avoid resending an existing brief, paginate chat history, and continue polling for the Policy Reviewer verdict.
+- Unknown provider outcomes persist a safe external hint and reconciliation receives the original request context. This lets the Band adapter resume instead of blindly repeating an external action.
+- Band verdict parsing accepts Band's structured delivery mentions without allowing a mentioned final verdict to start another negotiation turn.
+- Sales-draft generation now uses OpenRouter's OpenAI-compatible chat-completions endpoint with `openai/gpt-5.6-luna`, required-parameter routing, and Zod-validated structured output. The provider remains recorded as `OPENAI` in the shared proof model; `OPENROUTER` is recorded in its redacted metadata.
+- `demo:verify` reconciles pending Render task intents before running strict proof checks.
+- Local commands consistently load root `.env.local`. Render builds explicitly install development dependencies because TypeScript and Vite are required during the build.
+
 Important files:
 
 - `packages/contracts/src/index.ts`: shared runtime schemas and TypeScript types. Change the contract here first when adding API data.
@@ -112,7 +123,7 @@ Do not mistake an API connection for a finished frontend integration:
 - The checked-in OpenAPI object is only a route summary, not a complete schema-level API description, and it omits some implemented routes.
 - There are backend tests, but no browser-level or component-level tests proving the merged frontend behavior.
 - Real provider credentials, account-specific Terac paths, Render provisioning, webhook registration, and a complete judged run have not been verified by this branch.
-- The local check and production build passed before the first WIP push, with 13 test files and 101 tests. That is automated code evidence, not deployed or real-provider evidence.
+- The latest local check passes with 16 test files and 128 tests. The current production build should still be run after integration. This is automated code evidence, not deployed or real-provider evidence.
 
 ## Newer instructions that must be reconciled
 
@@ -130,6 +141,8 @@ Read both before changing provider behavior. They were committed after the backe
 | Band | Uses three external Band identities plus one persistent Render worker with separate Codex threads. | Recommends platform agents, while describing the gateway worker as an alternative. | Confirm the topology with the project owner before replacing the working adapter/worker design. |
 | Terac | Implements configurable HTTP adapters and expects account-specific paths. | Transport and response schema still require account confirmation. | Keep paths configurable; do not invent endpoints or mark provider proof as verified without an account-backed run. |
 | Render | Uses named TypeScript tasks and database reconciliation. | Confirms task results should be written to Postgres and no webhook should be invented. | Preserve the database-backed task/result approach. |
+
+The current outreach configuration is intentionally locked to `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1` and `OPENROUTER_MODEL=openai/gpt-5.6-luna`. Put the key in `OPENROUTER_API_KEY`; the previous `OPENAI_API_KEY` and `OPENAI_MODEL` settings are no longer used for outreach.
 
 Do not silently choose between contradictory instructions. Record the owner's answer in the relevant document and tests, then make the smallest code change that implements it.
 
@@ -157,7 +170,7 @@ npm run build
 For the local persisted rehearsal:
 
 ```sh
-cp .env.example .env
+cp .env.example .env.local
 docker compose up -d postgres
 npm run db:generate
 npm run db:migrate
@@ -178,7 +191,7 @@ If dependencies or configuration are missing, report that separately from a code
 ## Safety and product invariants
 
 - Keep `JUDGE_MODE=false`, `PROVIDER_MODE=fake`, and `REAL_ACTIONS_ENABLED=false` during ordinary integration.
-- Never commit `.env`, provider keys, Codex authentication files, or raw provider payloads.
+- Never commit root `.env.local`, provider keys, Codex authentication files, or raw provider payloads.
 - Never paste credentials into an agent conversation.
 - Outbound messages may go only to explicitly consenting role-players on the allowlist. Monid/Apollo discoveries are research-only.
 - Preserve idempotency: inbound provider events are deduplicated and outbound side effects use stable idempotency keys.

@@ -159,7 +159,10 @@ export function createRoleHandler(
     // The Policy Reviewer mentions the Negotiator to make the final verdict
     // visible to its identity-scoped REST context. Do not turn that delivery
     // mention into another negotiation turn.
-    if (role === 'negotiator' && message.content.trimStart().startsWith('ZHC_VERDICT')) return
+    const contentWithoutDeliveryMentions = message.content
+      .replace(/^(?:@\[\[[^\]\r\n]{1,256}\]\]\s*)+/, '')
+      .trimStart()
+    if (role === 'negotiator' && contentWithoutDeliveryMentions.startsWith('ZHC_VERDICT')) return
     const participants = await tools.getParticipants()
     const mentions = ROLE_TARGETS[role].map((targetRole) => {
       const targetName = ROLE_NAMES[targetRole]

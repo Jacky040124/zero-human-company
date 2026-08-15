@@ -1,5 +1,5 @@
 import OpenAI from 'openai'
-import { zodTextFormat } from 'openai/helpers/zod'
+import { zodResponseFormat } from 'openai/helpers/zod'
 import { z } from 'zod'
 import type { ProviderCapabilities, ProviderPort, ProviderRequest, ProviderResult } from './types.js'
 import { requireConfig } from './types.js'
@@ -20,14 +20,23 @@ export type SalesDraftRequest = {
   objective: string
 }
 
-export class OpenAISalesProvider implements ProviderPort<SalesDraftRequest, z.infer<typeof salesDraftSchema>> {
+export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
+export const OPENROUTER_OUTREACH_MODEL = 'openai/gpt-5.6-luna'
+
+export class OpenRouterSalesProvider implements ProviderPort<SalesDraftRequest, z.infer<typeof salesDraftSchema>> {
   readonly provider = 'OPENAI' as const
   private readonly client: OpenAI
 
-  constructor(apiKey: string | undefined, private readonly model = 'gpt-5.6-luna') {
-    const config = requireConfig('OPENAI', { OPENAI_API_KEY: apiKey })
-    if (model !== 'gpt-5.6-luna') throw new Error('This project is locked to gpt-5.6-luna')
-    this.client = new OpenAI({ apiKey: config.OPENAI_API_KEY })
+  constructor(
+    apiKey: string | undefined,
+    private readonly model = OPENROUTER_OUTREACH_MODEL,
+    private readonly baseURL = OPENROUTER_BASE_URL,
+    client?: OpenAI,
+  ) {
+    const config = requireConfig('OPENAI', { OPENROUTER_API_KEY: apiKey })
+    if (model !== OPENROUTER_OUTREACH_MODEL) throw new Error(`This project is locked to ${OPENROUTER_OUTREACH_MODEL}`)
+    if (baseURL !== OPENROUTER_BASE_URL) throw new Error(`This project is locked to ${OPENROUTER_BASE_URL}`)
+    this.client = client ?? new OpenAI({ apiKey: config.OPENROUTER_API_KEY, baseURL })
   }
 
   capabilities(): ProviderCapabilities {
@@ -35,14 +44,19 @@ export class OpenAISalesProvider implements ProviderPort<SalesDraftRequest, z.in
   }
 
   async preflight(): Promise<void> {
-    if (this.model !== 'gpt-5.6-luna') throw new Error('Unexpected OpenAI model')
+    if (this.model !== OPENROUTER_OUTREACH_MODEL || this.baseURL !== OPENROUTER_BASE_URL) {
+      throw new Error('Unexpected OpenRouter outreach configuration')
+    }
   }
 
   async execute(request: ProviderRequest<SalesDraftRequest>): Promise<ProviderResult<z.infer<typeof salesDraftSchema>>> {
-    const response = await this.client.responses.parse({
+    const completion = await this.client.chat.completions.parse({
       model: this.model,
-      reasoning: { effort: 'medium' },
-      input: [
+      reasoning_effort: 'medium',
+      // OpenRouter can otherwise fall back to an endpoint that silently drops
+      // unsupported parameters, including the JSON schema below.
+      ...{ provider: { require_parameters: true } },
+      messages: [
         {
           role: 'system',
           content: 'You draft concise B2B furniture outreach only for explicitly consenting hackathon role-players. Use only supplied evidence. Flag any unsupported or binding claim for human review.',
@@ -52,16 +66,22 @@ export class OpenAISalesProvider implements ProviderPort<SalesDraftRequest, z.in
           content: JSON.stringify({ ...request.payload, idempotencyReference: request.idempotencyKey }),
         },
       ],
-      text: { format: zodTextFormat(salesDraftSchema, 'sales_draft') },
+      response_format: zodResponseFormat(salesDraftSchema, 'sales_draft'),
     })
-    if (!response.output_parsed) throw new Error('OpenAI returned no schema-valid sales draft')
+    const draft = completion.choices[0]?.message.parsed
+    if (!draft) throw new Error('OpenRouter returned no schema-valid sales draft')
     return {
       provider: 'OPENAI',
-      externalId: response.id,
+      externalId: completion.id,
       live: true,
       status: 'COMPLETE',
-      data: response.output_parsed,
-      redacted: { responseId: response.id, model: this.model, needsHumanReview: response.output_parsed.needsHumanReview },
+      data: draft,
+      redacted: {
+        responseId: completion.id,
+        router: 'OPENROUTER',
+        model: this.model,
+        needsHumanReview: draft.needsHumanReview,
+      },
     }
   }
 }

@@ -3,7 +3,7 @@ services:
     name: zero-human-company
     runtime: node
     region: oregon
-    buildCommand: npm ci && npm run db:generate && npm run build
+    buildCommand: npm ci --include=dev && npm run db:generate && npm run build
     preDeployCommand: npm run db:migrate
     startCommand: npm start
     healthCheckPath: /healthz
@@ -28,8 +28,12 @@ services:
         value: "false"
       - key: PROVIDER_MODE
         value: fake
-      - key: OPENAI_API_KEY
+      - key: OPENROUTER_API_KEY
         sync: false
+      - key: OPENROUTER_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: OPENROUTER_MODEL
+        value: openai/gpt-5.6-luna
       - key: STRIPE_MODE
         value: TEST
       - key: STRIPE_SECRET_KEY

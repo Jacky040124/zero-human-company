@@ -18,7 +18,7 @@ npm run dev
 Start PostgreSQL, migrate, and run one deterministic rehearsal:
 
 ```sh
-cp .env.example .env
+cp .env.example .env.local
 docker compose up -d postgres
 npm install
 npm run db:migrate

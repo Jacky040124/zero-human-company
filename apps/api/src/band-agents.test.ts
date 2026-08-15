@@ -189,6 +189,23 @@ describe('Band role handler', () => {
     expect(sendMessage).not.toHaveBeenCalled()
   })
 
+  it('stops when Band prepends its structured delivery mention to the final verdict', async () => {
+    const getParticipants = vi.fn(async () => [])
+    const sendMessage = vi.fn(async () => ({}))
+    const brain = vi.fn(async () => ({
+      text: 'must not run', runtime: 'CODEX' as const, model: CODEX_BAND_AGENT_MODEL,
+    }))
+    const handler = createRoleHandler('negotiator', brain)
+    await handler({
+      roomId: 'room-1',
+      message: { content: '@[[negotiator-id]] ZHC_VERDICT {"recommendation":"COUNTER"}' },
+      tools: { getParticipants, sendMessage },
+    })
+    expect(getParticipants).not.toHaveBeenCalled()
+    expect(brain).not.toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
   it('does not send when a required participant cannot be resolved', async () => {
     const sendMessage = vi.fn(async () => ({}))
     const handler = createRoleHandler('negotiator', vi.fn(async () => ({

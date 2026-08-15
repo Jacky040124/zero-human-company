@@ -22,8 +22,9 @@ const configSchema = z.object({
   JUDGE_MODE: booleanFromEnv,
   REAL_ACTIONS_ENABLED: booleanFromEnv,
   PROVIDER_MODE: z.enum(['fake', 'real']).default('fake'),
-  OPENAI_API_KEY: optionalEnv(z.string()),
-  OPENAI_MODEL: z.literal('gpt-5.6-luna').default('gpt-5.6-luna'),
+  OPENROUTER_API_KEY: optionalEnv(z.string()),
+  OPENROUTER_BASE_URL: z.literal('https://openrouter.ai/api/v1').default('https://openrouter.ai/api/v1'),
+  OPENROUTER_MODEL: z.literal('openai/gpt-5.6-luna').default('openai/gpt-5.6-luna'),
   STRIPE_SECRET_KEY: optionalEnv(z.string()),
   STRIPE_WEBHOOK_SECRET: optionalEnv(z.string()),
   STRIPE_MODE: z.enum(['TEST', 'LIVE']).default('TEST'),
@@ -80,7 +81,7 @@ export function getConfig(): AppConfig {
 }
 
 export const judgeRequiredEnv = [
-  'OPENAI_API_KEY',
+  'OPENROUTER_API_KEY',
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
   'LINQ_API_BASE_URL',
