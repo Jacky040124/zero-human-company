@@ -12,6 +12,7 @@ import { CatalogView } from './pages/app/CatalogView'
 import { Contract } from './pages/app/Contract'
 import { ContractsList } from './pages/app/ContractsList'
 import { Dashboard } from './pages/app/Dashboard'
+import { Discovery } from './pages/app/Discovery'
 import { LeadDetail } from './pages/app/LeadDetail'
 import { BobbyLab } from './pages/BobbyLab'
 
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/app" element={<AppShell />}>
           <Route index element={<Navigate to="/app/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="discovery" element={<Discovery />} />
           <Route path="buyers" element={<Buyers />} />
           <Route path="catalog" element={<CatalogView />} />
           <Route path="contracts" element={<ContractsList />} />

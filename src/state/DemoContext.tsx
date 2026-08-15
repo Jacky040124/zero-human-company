@@ -7,7 +7,14 @@ import {
   useState,
 } from 'react'
 import type { ReactNode } from 'react'
-import { cannedBuyerReply, factory, leads as seedLeads, makeThread, shortCompany } from '../data'
+import {
+  cannedBuyerReply,
+  discoveryLeads,
+  factory,
+  leads as seedLeads,
+  makeThread,
+  shortCompany,
+} from '../data'
 import type { Lead } from '../data'
 import type { ThreadMessage } from '../data/thread'
 
@@ -129,6 +136,8 @@ type DemoState = {
   threads: Record<string, ThreadMessage[]>
   sendLeadMessage: (id: string, body: string) => void
   leadTyping: Record<string, boolean>
+  startDiscovery: () => number
+  discoveryRemaining: number
 }
 
 const DemoContext = createContext<DemoState | null>(null)
@@ -277,6 +286,39 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     setLeadAutonomyMap((current) => ({ ...current, [id]: value }))
   }, [])
 
+  const DISCOVERY_BATCH = 3
+
+  const startDiscovery = useCallback(() => {
+    const existing = new Set(leadsRef.current.map((lead) => lead.id))
+    const next = discoveryLeads.filter((lead) => !existing.has(lead.id)).slice(0, DISCOVERY_BATCH)
+    if (next.length === 0) return 0
+
+    setLeads((current) => [...current, ...next])
+    setLeadAutonomyMap((current) => ({
+      ...current,
+      ...Object.fromEntries(next.map((lead) => [lead.id, true])),
+    }))
+    setThreads((current) => ({
+      ...current,
+      ...Object.fromEntries(next.map((lead) => [lead.id, [] as ThreadMessage[]])),
+    }))
+    setActivity((current) =>
+      [
+        {
+          id: activityId.current++,
+          time: nowLabel(),
+          text: `${next.length} new buyers added to pipeline`,
+        },
+        ...current,
+      ].slice(0, 8),
+    )
+    return next.length
+  }, [])
+
+  const discoveryRemaining = discoveryLeads.filter(
+    (lead) => !leads.some((item) => item.id === lead.id),
+  ).length
+
   const thread = threads.nordlicht ?? []
   const buyerTyping = Boolean(leadTyping.nordlicht)
 
@@ -297,6 +339,8 @@ export function DemoProvider({ children }: { children: ReactNode }) {
         threads,
         sendLeadMessage,
         leadTyping,
+        startDiscovery,
+        discoveryRemaining,
       }}
     >
       {children}

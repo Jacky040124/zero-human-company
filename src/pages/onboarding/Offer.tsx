@@ -178,7 +178,6 @@ export function Offer() {
       nextTo="/onboarding/outreach"
       nextLabel="Those are my rules →"
       bobbyExpression={voice.expression}
-      bobbyLineKey={voice.line}
     >
       <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
         {TERMS.map(([label, value]) => (

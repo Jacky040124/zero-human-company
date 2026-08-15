@@ -190,7 +190,6 @@ export function Access() {
       nextTo="/app/buyers"
       nextLabel="Open the workspace"
       bobbyExpression={bobby.expression}
-      bobbyLineKey={bobby.line}
     >
       <div className="max-w-2xl">
         <AccessSlider value={accessLevel} onChange={setAccessLevel} />

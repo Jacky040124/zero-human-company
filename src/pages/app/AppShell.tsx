@@ -6,7 +6,8 @@ import { useDemo } from '../../state/DemoContext'
 
 const nav = [
   { to: '/app/dashboard', label: 'Dashboard' },
-  { to: '/app/buyers', label: 'Buyers' },
+  { to: '/app/discovery', label: 'Discovery' },
+  { to: '/app/buyers', label: 'Pipeline' },
   { to: '/app/catalog', label: 'Catalog' },
   { to: '/app/contracts', label: 'Contracts' },
 ]
@@ -36,12 +37,6 @@ export function AppShell() {
             </NavLink>
           ))}
         </nav>
-        <div className="mt-auto rounded-md border border-line px-3 py-3">
-          <p className="text-xs text-muted">Sources in use</p>
-          <p className="mt-1 text-sm leading-snug text-ink">
-            LinkedIn, Maps, customs, directories, showrooms…
-          </p>
-        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -74,7 +69,7 @@ export function AppShell() {
             <StatusPill>{liveWorkers} workers live</StatusPill>
           </div>
         </header>
-        <main className="min-w-0 flex-1 overflow-auto p-6">
+        <main className="min-w-0 flex-1 overflow-auto bg-canvas p-6">
           <Outlet />
         </main>
       </div>

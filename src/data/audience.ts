@@ -1,58 +1,81 @@
-export type AudienceSegment = {
-  id: string
-  title: string
-  fit: string
-  why: string
-  examples: string
-  shortLabel: string
-  hint: string
-}
+export type AudienceSegment = 'importer' | 'hotel' | 'retail'
 
-export type AudiencePin = {
+export type AudienceCandidate = {
   id: string
+  company: string
   city: string
-  segment: 'importers' | 'hospitality' | 'retail'
-  x: number
-  y: number
+  country: string
+  segment: AudienceSegment
+  why: string
 }
 
-export const audience: AudienceSegment[] = [
+export const audienceCandidates: AudienceCandidate[] = [
   {
-    id: 'importers',
-    title: 'Independent EU importers',
-    fit: 'Primary',
-    why: 'They already run 40HQ programs, speak Incoterms, and can place a first order without a retailer committee.',
-    examples: 'Hamburg, Rotterdam, Antwerp, Le Havre specialists.',
-    shortLabel: 'Importers',
-    hint: '4 ports',
+    id: 'nordlicht',
+    company: 'Nordlicht Import',
+    city: 'Hamburg',
+    country: 'Germany',
+    segment: 'importer',
+    why: 'customs filings match — imports FSC furniture',
   },
   {
-    id: 'hospitality',
-    title: 'Hospitality procurement',
-    fit: 'Secondary',
-    why: 'Hotel casegoods suite 22 matches 3-star and 4-star refurb cycles in DACH and Benelux.',
-    examples: 'Buying groups and FF&E houses in Munich, Vienna, Amsterdam.',
-    shortLabel: 'Hotel FF&E',
-    hint: 'DACH',
+    id: 'maas',
+    company: 'Maas Interiors',
+    city: 'Rotterdam',
+    country: 'Netherlands',
+    segment: 'importer',
+    why: '40HQ program, 2 sailings/quarter',
   },
   {
-    id: 'retail',
-    title: 'Mid-market retail chains',
-    fit: 'Watch',
-    why: 'Longer cycle, higher brand control. Good once a reference importer is live.',
-    examples: 'Regional chains in France, Nordics, and northern Italy.',
-    shortLabel: 'Retail',
-    hint: 'later',
+    id: 'brabant',
+    company: 'Brabant Wonen',
+    city: 'Eindhoven',
+    country: 'Netherlands',
+    segment: 'importer',
+    why: 'matched from Dutch customs filings',
+  },
+  {
+    id: 'gota',
+    company: 'Göta Living',
+    city: 'Gothenburg',
+    country: 'Sweden',
+    segment: 'importer',
+    why: 'West Coast importer, first letter drafted',
+  },
+  {
+    id: 'oster',
+    company: 'Oster Wohnen',
+    city: 'Munich',
+    country: 'Germany',
+    segment: 'hotel',
+    why: 'refurb cycle Q4, 40 rooms',
+  },
+  {
+    id: 'elbe',
+    company: 'Elbe Contract',
+    city: 'Dresden',
+    country: 'Germany',
+    segment: 'hotel',
+    why: '24-room casegoods, PO in review',
+  },
+  {
+    id: 'havn',
+    company: 'Havn Studio',
+    city: 'Copenhagen',
+    country: 'Denmark',
+    segment: 'retail',
+    why: 'showroom sample pair, MOQ still open',
+  },
+  {
+    id: 'atelier-loire',
+    company: 'Atelier Loire',
+    city: 'Nantes',
+    country: 'France',
+    segment: 'retail',
+    why: 'oak dining book, fabric pick pending',
   },
 ]
 
-export const audiencePins: AudiencePin[] = [
-  { id: 'hamburg', city: 'Hamburg', segment: 'importers', x: 54, y: 26 },
-  { id: 'rotterdam', city: 'Rotterdam', segment: 'importers', x: 40, y: 32 },
-  { id: 'antwerp', city: 'Antwerp', segment: 'importers', x: 38, y: 40 },
-  { id: 'lehavre', city: 'Le Havre', segment: 'importers', x: 28, y: 42 },
-  { id: 'munich', city: 'Munich', segment: 'hospitality', x: 56, y: 56 },
-  { id: 'vienna', city: 'Vienna', segment: 'hospitality', x: 70, y: 54 },
-  { id: 'paris', city: 'Paris', segment: 'retail', x: 32, y: 52 },
-  { id: 'milan', city: 'Milan', segment: 'retail', x: 50, y: 70 },
-]
+export const defaultAudienceIds = audienceCandidates
+  .filter((candidate) => candidate.segment !== 'retail')
+  .map((candidate) => candidate.id)

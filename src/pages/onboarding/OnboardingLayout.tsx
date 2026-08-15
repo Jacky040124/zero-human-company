@@ -21,8 +21,6 @@ type Props = {
   nextLabel?: string
   hideCta?: boolean
   bobbyExpression: BobbyExpression
-  bobbyLine?: string
-  bobbyLineKey?: string
   children: ReactNode
 }
 
@@ -34,12 +32,8 @@ export function OnboardingLayout({
   nextLabel = 'Looks good',
   hideCta = false,
   bobbyExpression,
-  bobbyLine,
-  bobbyLineKey,
   children,
 }: Props) {
-  const line = bobbyLine ?? title
-
   return (
     <div className="min-h-svh bg-canvas">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
@@ -91,7 +85,7 @@ export function OnboardingLayout({
         )}
       </main>
 
-      <BobbyDock expression={bobbyExpression} line={line} lineKey={bobbyLineKey ?? line} />
+      <BobbyDock expression={bobbyExpression} />
     </div>
   )
 }

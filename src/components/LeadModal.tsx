@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { motion } from 'framer-motion'
 import { statusLabel } from '../data'
 import type { Lead, LeadStatus } from '../data'
 import { useDemo } from '../state/DemoContext'
@@ -17,6 +19,21 @@ const statusText: Record<LeadStatus, string> = {
 type LeadModalProps = {
   lead: Lead
   onClose: () => void
+}
+
+function TypingDots() {
+  return (
+    <span className="inline-flex items-center gap-0.5 py-1">
+      {[0, 1, 2].map((index) => (
+        <motion.span
+          key={index}
+          className="h-1 w-1 rounded-full bg-muted"
+          animate={{ opacity: [0.25, 1, 0.25] }}
+          transition={{ duration: 0.9, repeat: Infinity, delay: index * 0.16 }}
+        />
+      ))}
+    </span>
+  )
 }
 
 export function LeadModal({ lead, onClose }: LeadModalProps) {
@@ -84,6 +101,13 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
               <p className="mt-0.5 text-xs text-faint">
                 {lead.city}, {lead.country}
               </p>
+              <p className="mt-1.5 text-xs text-muted">{lead.lastAction}</p>
+              <Link
+                to={`/app/leads/${lead.id}`}
+                className="mt-2 inline-block text-[0.72rem] font-medium text-accent no-underline hover:underline"
+              >
+                Full thread →
+              </Link>
             </div>
             <div className="flex shrink-0 items-center gap-3">
               <div className="text-right">
@@ -107,26 +131,41 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
           </div>
         </header>
 
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-canvas px-5 py-4">
           <div className="space-y-3">
-            {messages.map((message) => (
-              <article
-                key={message.id}
-                className={`rounded-md px-3 py-2.5 ${
-                  message.role === 'buyer'
-                    ? 'bg-sidebar'
-                    : 'border border-line bg-bg'
-                }`}
-              >
-                <div className="flex items-baseline justify-between gap-3">
-                  <p className="text-sm font-medium text-ink">{message.from}</p>
-                  <p className="text-[11px] text-faint">{message.time}</p>
+            {messages.map((message) => {
+              const mine = message.role !== 'buyer'
+              return (
+                <div
+                  key={message.id}
+                  className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}
+                >
+                  <p
+                    className={`mb-1 px-1 text-[0.62rem] text-faint ${
+                      mine ? 'text-right' : ''
+                    }`}
+                  >
+                    {message.from} · {message.time}
+                  </p>
+                  <div
+                    className={`max-w-[82%] px-3 py-2 ${
+                      mine
+                        ? 'rounded-xl rounded-br-sm bg-accent-soft'
+                        : 'rounded-xl rounded-bl-sm border border-black/6 bg-bg'
+                    }`}
+                  >
+                    <p className="text-sm leading-relaxed text-ink">{message.body}</p>
+                  </div>
                 </div>
-                <p className="mt-1.5 text-sm leading-relaxed text-ink">{message.body}</p>
-              </article>
-            ))}
+              )
+            })}
             {typing ? (
-              <p className="px-1 text-sm text-muted">{lead.buyer} is typing…</p>
+              <div className="flex flex-col items-start">
+                <p className="mb-1 px-1 text-[0.62rem] text-faint">{lead.buyer}</p>
+                <div className="rounded-xl rounded-bl-sm border border-black/6 bg-bg px-3 py-2">
+                  <TypingDots />
+                </div>
+              </div>
             ) : null}
           </div>
         </div>

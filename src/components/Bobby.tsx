@@ -1,5 +1,5 @@
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { useId, type ReactNode } from 'react'
+import { motion, useReducedMotion } from 'framer-motion'
+import { useId } from 'react'
 
 export type BobbyExpression =
   | 'happy'
@@ -235,32 +235,18 @@ export function BobbyFace({ expression = 'happy', size = 48, shadow = true }: Fa
 
 type DockProps = {
   expression?: BobbyExpression
-  line: ReactNode
-  /** stable key for the current line; bubble re-pops when it changes */
-  lineKey?: string
   size?: number
 }
 
 /**
- * Corner-docked Bobby: floating glossy ball + speech bubble that pops
- * when the line changes. Fixed to the bottom-right of the viewport.
+ * Corner-docked Bobby: floating glossy ball fixed to the bottom-right
+ * of the viewport. The expression carries the mood; the page heading
+ * carries the words.
  */
-export function BobbyDock({ expression = 'happy', line, lineKey, size = 56 }: DockProps) {
+export function BobbyDock({ expression = 'happy', size = 56 }: DockProps) {
   const reduce = useReducedMotion()
   return (
-    <div className="pointer-events-none fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2">
-      <AnimatePresence mode="popLayout">
-        <motion.div
-          key={lineKey ?? String(line)}
-          initial={{ opacity: 0, scale: 0.8, y: 8 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          transition={{ type: 'spring', stiffness: 380, damping: 26 }}
-          className="pointer-events-auto max-w-64 rounded-xl rounded-br-sm border border-black/8 bg-bg px-3.5 py-2.5 text-sm leading-snug text-ink shadow-[0_4px_12px_rgba(15,15,15,0.1)]"
-        >
-          {line}
-        </motion.div>
-      </AnimatePresence>
+    <div className="pointer-events-none fixed bottom-6 right-6 z-40">
       <motion.div
         animate={reduce ? undefined : { y: [0, -6, 0] }}
         transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}

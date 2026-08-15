@@ -9,66 +9,348 @@ import {
   useTransform,
 } from 'framer-motion'
 import { BobbyFace } from '../components/Bobby'
-import { Logo } from '../components/Logo'
-
 const EASE = [0.16, 1, 0.3, 1] as const
 const VIEW = { once: true, margin: '-100px' } as const
 
-const STATUS_ORDER = [
-  'Sourcing',
-  'Contacted',
-  'Hotel trial',
-  'Stain samples',
-  'Negotiating',
-  'Contract draft',
+const HERO_BOARD = [
+  {
+    title: 'Sourcing',
+    dot: 'bg-stage-sourcing',
+    cards: [
+      ['Brabant Wonen', 'Eindhoven · customs filings match'],
+      ['Göta Living', 'Gothenburg · first letter drafted'],
+    ],
+  },
+  {
+    title: 'Contacted',
+    dot: 'bg-stage-contacted',
+    cards: [
+      ['Maas Interiors', 'Rotterdam · veneer sample ships Fri'],
+      ['Oster Wohnen', 'Munich · Suite 22 room pack sent'],
+      ['Atelier Loire', 'Nantes · waiting on fabric pick'],
+    ],
+  },
+  {
+    title: 'Negotiating',
+    dot: 'bg-stage-negotiating',
+    cards: [
+      ['Nordlicht Import', 'Hamburg · holding €158/seat'],
+      ['Havn Studio', 'Copenhagen · MOQ counter sent'],
+    ],
+  },
+  {
+    title: 'Contract',
+    dot: 'bg-stage-contract',
+    cards: [['Elbe Contract', 'Dresden · lawyer redlines back']],
+  },
 ] as const
 
-type LeadRow = {
-  id: string
-  name: string
-  city: string
-  status: string
+const HERO_STICKERS = [
+  { icon: '/bobby/icon-read.png', className: '-top-5 left-4 md:-left-6', rotate: -8, delay: 0 },
+  { icon: '/bobby/icon-hunt.png', className: '-top-7 right-16', rotate: 7, delay: 0.5 },
+  { icon: '/bobby/icon-negotiate.png', className: 'top-1/3 -right-4 md:-right-7', rotate: 10, delay: 1 },
+  { icon: '/bobby/icon-contract.png', className: '-bottom-4 right-6 md:-right-5', rotate: -6, delay: 1.5 },
+  { icon: '/bobby/icon-inspect.png', className: 'bottom-8 -left-4 md:-left-7', rotate: 8, delay: 2 },
+] as const
+
+const HERO_PILLS = [
+  { word: 'Contract', bg: 'bg-peach', dot: 'bg-saffron' },
+  { word: 'Deal', bg: 'bg-accent-soft', dot: 'bg-accent' },
+  { word: 'Signature', bg: 'bg-good-soft', dot: 'bg-good' },
+  { word: 'Revenue', bg: 'bg-danger-soft', dot: 'bg-coral' },
+] as const
+
+function RotatingPill({ reduceMotion }: { reduceMotion: boolean }) {
+  const [index, setIndex] = useState(0)
+
+  useEffect(() => {
+    if (reduceMotion) return
+    const id = window.setInterval(() => {
+      setIndex((prev) => (prev + 1) % HERO_PILLS.length)
+    }, 2600)
+    return () => window.clearInterval(id)
+  }, [reduceMotion])
+
+  const pill = HERO_PILLS[index]
+
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-[0.28em] rounded-full px-[0.42em] py-[0.08em] transition-colors duration-500 ${pill.bg}`}
+    >
+      <span
+        aria-hidden
+        className={`inline-block h-[0.32em] w-[0.32em] shrink-0 rounded-full transition-colors duration-500 ${pill.dot}`}
+      />
+      <span className="relative inline-grid justify-items-center overflow-hidden">
+        {/* Invisible copy of the longest word keeps the slot width fixed,
+            so the headline never reflows as words rotate. */}
+        <span aria-hidden className="invisible whitespace-nowrap [grid-area:1/1]">
+          Signature
+        </span>
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span
+            key={pill.word}
+            initial={reduceMotion ? false : { y: '105%', opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={reduceMotion ? undefined : { y: '-105%', opacity: 0 }}
+            transition={{ duration: 0.4, ease: EASE }}
+            className="whitespace-nowrap [grid-area:1/1]"
+          >
+            {pill.word}
+          </motion.span>
+        </AnimatePresence>
+      </span>
+    </span>
+  )
 }
 
-const INITIAL_LEADS: LeadRow[] = [
-  { id: 'nordlicht', name: 'Nordlicht Import', city: 'Hamburg', status: 'Negotiating' },
-  { id: 'maas', name: 'Maas Interiors', city: 'Rotterdam', status: 'Contacted' },
-  { id: 'oster', name: 'Oster Wohnen', city: 'Munich', status: 'Hotel trial' },
-  { id: 'loire', name: 'Atelier Loire', city: 'Nantes', status: 'Stain samples' },
-]
+const HERO_TABS = ['Dashboard', 'Buyers', 'Catalog', 'Contracts'] as const
+type HeroTab = (typeof HERO_TABS)[number]
 
-const TUESDAY_LOG = [
-  {
-    time: '09:02',
-    tint: 'text-faint',
-    text: 'Read hengxin-catalog.pdf. Six products, flagged the sofa fabrics.',
-  },
-  {
-    time: '09:15',
-    tint: 'text-faint',
-    text: 'Matched 14 Hamburg importers from customs filings.',
-  },
-  {
-    time: '10:03',
-    tint: 'text-saffron',
-    text: 'First letters out. Email for Anja, WhatsApp for Mads.',
-  },
-  {
-    time: '11:40',
-    tint: 'text-signal',
-    text: 'Held the floor at €158/seat with Nordlicht. They stayed.',
-  },
-  {
-    time: '14:12',
-    tint: 'text-signal',
-    text: 'Booked a factory inspection for week 41.',
-  },
-  {
-    time: '16:20',
-    tint: 'text-good',
-    text: 'Sent the draft contract to a German lawyer for redlines.',
-  },
+const HERO_WORKERS = ['Worker 01', 'Worker 03', 'Worker 07', 'Worker 09'] as const
+
+const HERO_STATS = [
+  ['Conversations', '22', 'across 4 channels'],
+  ['Floor price', '€158', 'held with Nordlicht'],
+  ['Inspections', '1', 'booked · week 41'],
+  ['Contracts', '1', 'at lawyer redlines'],
 ] as const
+
+const HERO_ACTIVITY = [
+  ['10:44', 'Countered Nordlicht at €158/seat — they stayed'],
+  ['10:12', 'Sent Suite 22 room pack to Oster Wohnen'],
+  ['09:31', 'Found Brabant Wonen in customs filings'],
+  ['09:02', 'Read hengxin-catalog-2026.pdf · 214 products'],
+] as const
+
+const HERO_CATALOG_ROWS = [
+  ['Lingnan Sofa 04', '岭南沙发 04', '€186 / seat'],
+  ['Nanhai Table 12', '南海餐桌 12', '€214 / set'],
+  ['Hotel Suite 22', '酒店套房 22', '€390 / room'],
+  ['Canton Chair 19', '广府餐椅 19', '€41 / chair'],
+  ['Pearl Sideboard 08', '珠水边柜 08', '€143 / unit'],
+] as const
+
+const HERO_CONTRACTS = [
+  ['Elbe Contract', 'Dresden', 'Lawyer redlines back · ready to countersign', 'bg-stage-contract'],
+  ['Nordlicht Import', 'Hamburg', 'Drafting under German law · out tonight', 'bg-stage-negotiating'],
+] as const
+
+function HeroTabContent({ tab }: { tab: HeroTab }) {
+  if (tab === 'Buyers') {
+    return (
+      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+        {HERO_BOARD.map((column) => (
+          <div key={column.title} className="rounded-lg bg-canvas p-2">
+            <p className="flex items-center gap-1.5 px-1 pb-1.5 text-[0.68rem] font-medium text-muted">
+              <span className={`h-1.5 w-1.5 rounded-full ${column.dot}`} />
+              {column.title}
+              <span className="ml-auto text-faint">{column.cards.length}</span>
+            </p>
+            <div className="space-y-1.5">
+              {column.cards.map(([name, note]) => (
+                <div
+                  key={name}
+                  className="cursor-default rounded-md border border-black/6 bg-bg px-2.5 py-2 shadow-[0_1px_3px_rgba(15,15,15,0.05)] transition-shadow hover:shadow-[0_3px_8px_rgba(15,15,15,0.1)]"
+                >
+                  <p className="truncate text-xs font-medium text-ink">{name}</p>
+                  <p className="mt-0.5 truncate text-[0.65rem] text-faint">{note}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  if (tab === 'Dashboard') {
+    return (
+      <div>
+        <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+          {HERO_STATS.map(([label, value, hint]) => (
+            <div key={label} className="rounded-lg bg-canvas px-3 py-2.5">
+              <p className="text-[0.65rem] text-muted">{label}</p>
+              <p className="mt-0.5 font-mono text-lg font-semibold tabular-nums text-ink">
+                {value}
+              </p>
+              <p className="truncate text-[0.62rem] text-faint">{hint}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2.5 rounded-lg bg-canvas p-2">
+          {HERO_ACTIVITY.map(([time, text]) => (
+            <p
+              key={time}
+              className="flex items-baseline gap-2.5 rounded-md px-2 py-1.5 text-xs text-ink/80 hover:bg-bg"
+            >
+              <span className="shrink-0 font-mono text-[0.65rem] tabular-nums text-faint">
+                {time}
+              </span>
+              <span className="truncate">{text}</span>
+            </p>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (tab === 'Catalog') {
+    return (
+      <div className="rounded-lg bg-canvas p-2">
+        {HERO_CATALOG_ROWS.map(([name, zh, price]) => (
+          <div
+            key={name}
+            className="flex items-center justify-between rounded-md px-2.5 py-2 text-xs hover:bg-bg"
+          >
+            <span className="truncate text-ink">
+              {name} <span className="text-faint">{zh}</span>
+            </span>
+            <span className="shrink-0 text-muted">{price}</span>
+          </div>
+        ))}
+        <p className="px-2.5 pt-1.5 pb-0.5 text-[0.65rem] text-faint">
+          + 209 more from the PDF
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {HERO_CONTRACTS.map(([name, city, note, dot]) => (
+        <div
+          key={name}
+          className="flex items-center gap-3 rounded-lg bg-canvas px-3 py-2.5"
+        >
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-medium text-ink">
+              {name} <span className="font-normal text-faint">· {city}</span>
+            </p>
+            <p className="truncate text-[0.65rem] text-faint">{note}</p>
+          </div>
+          <span className="shrink-0 rounded-full bg-bg px-2 py-0.5 text-[0.62rem] text-muted">
+            PDF
+          </span>
+        </div>
+      ))}
+      <p className="px-1 text-[0.65rem] italic text-faint">
+        You'll only ever see this tab twice.
+      </p>
+    </div>
+  )
+}
+
+const HERO_TAB_HEADERS: Record<HeroTab, string> = {
+  Dashboard: "Tuesday · Bobby's desk",
+  Buyers: 'Pipeline · 22 buyers',
+  Catalog: 'Catalog · 214 products',
+  Contracts: 'Contracts · 1 ready to sign',
+}
+
+function HeroWorkspaceMock() {
+  const [tab, setTab] = useState<HeroTab>('Buyers')
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-black/10 bg-bg shadow-[0_24px_64px_rgba(15,15,15,0.16)]">
+      <div className="flex items-center gap-1.5 border-b border-black/8 bg-sidebar px-4 py-2.5">
+        <span className="h-2.5 w-2.5 rounded-full bg-black/12" />
+        <span className="h-2.5 w-2.5 rounded-full bg-black/12" />
+        <span className="h-2.5 w-2.5 rounded-full bg-black/12" />
+        <span className="ml-3 flex items-center gap-1.5 rounded-md bg-bg px-2.5 py-1 text-[0.68rem] font-medium text-ink/75">
+          <BobbyFace expression="happy" size={13} />
+          Lead Factory — Hengxin Home
+        </span>
+      </div>
+
+      <div className="flex">
+        <aside className="hidden w-44 shrink-0 border-r border-black/8 bg-sidebar px-3 py-4 md:block">
+          <div className="space-y-0.5">
+            {HERO_TABS.map((label) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setTab(label)}
+                className={`block w-full cursor-pointer rounded-md border-0 px-2.5 py-1.5 text-left text-xs transition-colors ${
+                  tab === label
+                    ? 'bg-hover font-medium text-ink'
+                    : 'bg-transparent text-muted hover:bg-hover/60 hover:text-ink'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-5 px-2.5 text-[0.62rem] font-semibold uppercase tracking-widest text-faint">
+            Workers
+          </p>
+          <div className="mt-1.5 space-y-0.5">
+            {HERO_WORKERS.map((worker) => (
+              <p
+                key={worker}
+                className="flex items-center gap-2 rounded-md px-2.5 py-1 text-xs text-muted"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-good" />
+                {worker}
+              </p>
+            ))}
+          </div>
+        </aside>
+
+        <div className="min-w-0 flex-1 p-4 text-left">
+          <div className="flex items-center justify-between px-1 pb-3 md:hidden">
+            <div className="flex gap-1">
+              {HERO_TABS.map((label) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setTab(label)}
+                  className={`cursor-pointer rounded-full border-0 px-2.5 py-1 text-[0.68rem] transition-colors ${
+                    tab === label ? 'bg-ink text-white' : 'bg-canvas text-muted'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex min-h-[16.5rem] flex-col">
+            <div className="flex items-center justify-between px-1 pb-3">
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.p
+                  key={tab}
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.15 }}
+                  className="text-sm font-semibold text-ink"
+                >
+                  {HERO_TAB_HEADERS[tab]}
+                </motion.p>
+              </AnimatePresence>
+              <span className="flex items-center gap-1.5 text-[0.68rem] font-medium text-good">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-good" />
+                Bobby is working
+              </span>
+            </div>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={tab}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.18, ease: EASE }}
+              >
+                <HeroTabContent tab={tab} />
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const CAPABILITIES = [
   { icon: '/bobby/icon-read.png', label: 'Reads catalogs', to: '/onboarding/catalog' },
@@ -92,21 +374,6 @@ const MINI_PIPELINE_ROWS = [
   ['Brabant Wonen', 'Sourcing', 'bg-stage-sourcing'],
 ] as const
 
-function nextStatus(status: string): string {
-  const index = STATUS_ORDER.indexOf(status as (typeof STATUS_ORDER)[number])
-  if (index === -1 || index === STATUS_ORDER.length - 1) return STATUS_ORDER[0]
-  return STATUS_ORDER[index + 1]
-}
-
-function statusPillClass(status: string): string {
-  if (status === 'Negotiating') return 'bg-stage-negotiating/12 text-stage-negotiating'
-  if (status === 'Contract draft') return 'bg-stage-contract/12 text-stage-contract'
-  if (status === 'Contacted' || status === 'Hotel trial') {
-    return 'bg-stage-contacted/12 text-stage-contacted'
-  }
-  return 'bg-stage-sourcing/12 text-stage-sourcing'
-}
-
 function Tap({ children }: { children: ReactNode }) {
   return (
     <motion.span className="inline-flex" whileTap={{ scale: 0.98 }}>
@@ -119,21 +386,25 @@ function CtaLink({
   to,
   children,
   variant,
+  size = 'md',
 }: {
   to: string
   children: ReactNode
   variant: 'primary' | 'ghost' | 'ink'
+  size?: 'md' | 'lg'
 }) {
   const styles = {
     primary: 'bg-accent text-white hover:bg-accent/90',
     ghost: 'bg-accent-soft text-accent hover:bg-accent-soft/80',
     ink: 'bg-ink text-white hover:bg-ink/90',
   }[variant]
+  const sizing =
+    size === 'lg' ? 'rounded-xl px-6 py-3 text-base' : 'rounded-lg px-4 py-1.5 text-sm'
 
   return (
     <Link
       to={to}
-      className={`inline-flex items-center justify-center rounded-lg px-4 py-1.5 text-sm font-medium no-underline transition-colors ${styles}`}
+      className={`inline-flex items-center justify-center font-medium no-underline transition-colors ${sizing} ${styles}`}
     >
       {children}
     </Link>
@@ -147,6 +418,15 @@ const NOD_ITEMS = [
   'our catalog lives in an 87-page PDF',
 ] as const
 
+const CONTRACT_ROWS = [
+  { label: 'Parties', value: 'Hengxin Home ↔ Nordlicht Import GmbH' },
+  { label: 'Order', value: '2 × 40HQ · Lingnan Sofa 04 · cream bouclé' },
+  { label: 'Price', value: '€158 / seat — floor enforced, never below cost' },
+  { label: 'Terms', value: 'Inspection week 41 · German law · counsel redlines' },
+] as const
+
+const UNLOCK_EXPRESSIONS = ['neutral', 'happy', 'happy', 'proud', 'excited'] as const
+
 function UnlockChecklist({ reduceMotion }: { reduceMotion: boolean }) {
   const [checked, setChecked] = useState<boolean[]>(() => NOD_ITEMS.map(() => false))
   const count = checked.filter(Boolean).length
@@ -157,78 +437,140 @@ function UnlockChecklist({ reduceMotion }: { reduceMotion: boolean }) {
   }
 
   return (
-    <div className="mx-auto max-w-xl text-left">
-      <p className="text-center text-sm text-ink/60">nodding along? tick the boxes ↓</p>
-      <div className="mt-5 space-y-2">
-        {NOD_ITEMS.map((item, index) => (
-          <motion.button
-            key={item}
-            type="button"
-            onClick={() => toggle(index)}
-            whileTap={reduceMotion ? undefined : { scale: 0.985 }}
-            className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition-colors ${
-              checked[index]
-                ? 'border-ink/20 bg-bg text-ink'
-                : 'border-ink/10 bg-white/45 text-ink/70 hover:bg-white/70'
-            }`}
-          >
-            <span
-              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
-                checked[index] ? 'border-ink bg-ink text-white' : 'border-ink/30 bg-bg'
+    <div className="grid items-center gap-10 md:grid-cols-2">
+      <div>
+        <h2 className="text-3xl font-semibold tracking-tight text-ink">
+          The whole sales team. Zero humans.
+        </h2>
+        <p className="mt-2 text-sm text-ink/60">
+          nodding along? tick the boxes — the contract writes itself →
+        </p>
+        <div className="mt-6 space-y-2">
+          {NOD_ITEMS.map((item, index) => (
+            <motion.button
+              key={item}
+              type="button"
+              onClick={() => toggle(index)}
+              whileTap={reduceMotion ? undefined : { scale: 0.985 }}
+              className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition-colors ${
+                checked[index]
+                  ? 'border-ink/20 bg-bg text-ink'
+                  : 'border-ink/10 bg-white/45 text-ink/70 hover:bg-white/70'
               }`}
-              aria-hidden
             >
-              {checked[index] ? (
-                <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-                  <path
-                    d="M2.5 6.5 5 9l4.5-6"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              ) : null}
-            </span>
-            {item}
-          </motion.button>
-        ))}
-      </div>
-
-      <div className="mt-4 flex min-h-14 items-center justify-between gap-4">
-        <p className="font-mono text-xs tabular-nums text-ink/55">
+              <span
+                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
+                  checked[index] ? 'border-ink bg-ink text-white' : 'border-ink/30 bg-bg'
+                }`}
+                aria-hidden
+              >
+                {checked[index] ? (
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                    <path
+                      d="M2.5 6.5 5 9l4.5-6"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                ) : null}
+              </span>
+              {item}
+            </motion.button>
+          ))}
+        </div>
+        <p className="mt-4 font-mono text-xs tabular-nums text-ink/55">
           {count}/{NOD_ITEMS.length} checked
         </p>
-        <AnimatePresence mode="wait" initial={false}>
-          {unlocked ? (
-            <motion.div
-              key="unlocked"
-              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.7, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{ type: 'spring', stiffness: 320, damping: 20 }}
-              className="flex items-center gap-3"
-            >
-              <BobbyFace expression="excited" size={36} />
-              <Tap>
-                <CtaLink to="/onboarding/catalog" variant="ink">
-                  Bobby, take the desk
-                </CtaLink>
-              </Tap>
-            </motion.div>
-          ) : (
-            <motion.p
-              key="locked"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="text-xs italic text-ink/45"
-            >
-              something unlocks when all of it sounds like your factory
-            </motion.p>
-          )}
-        </AnimatePresence>
       </div>
+
+      <motion.div
+        animate={
+          reduceMotion
+            ? undefined
+            : { rotate: unlocked ? 0 : -1, scale: unlocked ? 1.02 : 1 }
+        }
+        transition={{ type: 'spring', stiffness: 220, damping: 22 }}
+        className="rounded-xl border border-black/8 bg-bg p-6 shadow-[0_12px_32px_rgba(15,15,15,0.16)]"
+      >
+        <div className="flex items-center justify-between border-b border-black/8 pb-3">
+          <div>
+            <p className="font-serif text-sm font-semibold tracking-wide text-ink">
+              SUPPLY AGREEMENT
+            </p>
+            <p className="mt-0.5 text-[0.65rem] uppercase tracking-widest text-faint">
+              {unlocked ? 'ready to sign' : `draft · ${count}/4 sections`}
+            </p>
+          </div>
+          <BobbyFace expression={UNLOCK_EXPRESSIONS[count]} size={32} />
+        </div>
+
+        <div className="mt-4 space-y-3.5">
+          {CONTRACT_ROWS.map((row, index) => {
+            const revealed = index < count
+            return (
+              <div key={row.label} className="flex gap-3 text-sm">
+                <span className="w-14 shrink-0 pt-0.5 text-[0.65rem] uppercase tracking-wide text-faint">
+                  {row.label}
+                </span>
+                {revealed ? (
+                  <motion.p
+                    initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, ease: EASE }}
+                    className="leading-snug text-ink/85"
+                  >
+                    {row.value}
+                  </motion.p>
+                ) : (
+                  <div className="flex-1 space-y-1.5 pt-1.5" aria-hidden>
+                    <div className="h-2 rounded-full bg-black/8" />
+                    <div className="h-2 w-2/3 rounded-full bg-black/8" />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="mt-5 flex min-h-16 items-center border-t border-dashed border-black/15 pt-4">
+          <AnimatePresence mode="wait" initial={false}>
+            {unlocked ? (
+              <motion.div
+                key="signed"
+                initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.85, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 20 }}
+                className="flex w-full flex-wrap items-center justify-between gap-4"
+              >
+                <div>
+                  <p className="font-serif text-2xl italic leading-none text-ink">Bobby</p>
+                  <p className="mt-1 text-[0.65rem] uppercase tracking-widest text-faint">
+                    signed for Hengxin Home
+                  </p>
+                </div>
+                <Tap>
+                  <CtaLink to="/onboarding/catalog" variant="ink">
+                    Bobby, take the desk
+                  </CtaLink>
+                </Tap>
+              </motion.div>
+            ) : (
+              <motion.p
+                key="waiting"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-xs italic text-faint"
+              >
+                signature appears when all of it sounds like your factory
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </div>
+      </motion.div>
     </div>
   )
 }
@@ -448,85 +790,6 @@ function MiniPipelineMock() {
   )
 }
 
-function RedSquiggle({ className }: { className: string }) {
-  return (
-    <svg className={className} viewBox="0 0 72 28" fill="none" aria-hidden>
-      <path
-        d="M2 18c6-14 12 10 20 2 8-8 10-16 18-8 7 7 10-10 20-8 6 1 8 8 10 12"
-        stroke="#e32d14"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}
-
-function LiveWorkspaceCard({ reduceMotion }: { reduceMotion: boolean }) {
-  const [leads, setLeads] = useState(INITIAL_LEADS)
-
-  useEffect(() => {
-    if (reduceMotion) return
-    let tick = 0
-    const id = window.setInterval(() => {
-      tick += 1
-      setLeads((prev) => {
-        const idx = tick % prev.length
-        const updated = prev.map((row, i) =>
-          i === idx ? { ...row, status: nextStatus(row.status) } : row,
-        )
-        if (tick % 2 === 1) {
-          const picked = updated[idx]
-          return [picked, ...updated.filter((_, i) => i !== idx)]
-        }
-        return updated
-      })
-    }, 2500)
-    return () => window.clearInterval(id)
-  }, [reduceMotion])
-
-  return (
-    <div className="rounded-xl border border-black/8 bg-bg p-4 shadow-[0_4px_12px_rgba(15,15,15,0.12)]">
-      <div className="flex items-center px-2 py-2">
-        <p className="text-sm font-medium text-ink">Bobby · discovering buyers</p>
-      </div>
-      <div className="space-y-2">
-        <AnimatePresence initial={false} mode="popLayout">
-          {leads.map((lead) => (
-            <motion.div
-              key={lead.id}
-              layout={!reduceMotion}
-              initial={reduceMotion ? false : { opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={reduceMotion ? undefined : { opacity: 0, y: -8 }}
-              transition={{ duration: 0.35, ease: EASE }}
-              className="flex items-center justify-between rounded-md bg-sidebar px-3 py-3"
-            >
-              <div>
-                <p className="text-sm font-medium text-ink">{lead.name}</p>
-                <p className="text-xs text-muted">{lead.city}</p>
-              </div>
-              <span className="relative min-w-[6.25rem] text-right">
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.span
-                    key={lead.status}
-                    initial={reduceMotion ? false : { opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={reduceMotion ? undefined : { opacity: 0, y: -6 }}
-                    transition={{ duration: 0.22, ease: EASE }}
-                    className={`inline-block rounded-full px-2 py-0.5 text-[0.68rem] font-medium ${statusPillClass(lead.status)}`}
-                  >
-                    {lead.status}
-                  </motion.span>
-                </AnimatePresence>
-              </span>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-    </div>
-  )
-}
-
 export function Landing() {
   const reduceMotion = Boolean(useReducedMotion())
   const { scrollYProgress } = useScroll()
@@ -542,37 +805,37 @@ export function Landing() {
         style={{ scaleX }}
       />
 
-      <header className="sticky top-0 z-40 border-b border-black/8 bg-canvas/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-          <Logo />
-          <Tap>
-            <CtaLink to="/app/buyers" variant="ghost">
-              Open workspace
-            </CtaLink>
-          </Tap>
-        </div>
-      </header>
-
-      <section className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 md:grid-cols-2">
-        <div>
-          <motion.p
+      <section className="mx-auto max-w-6xl px-6 pt-14 pb-20">
+        <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
+          <motion.img
             initial={hidden}
             animate={shown}
             transition={{ duration: 0.6, ease: EASE }}
-            className="text-xs font-medium uppercase tracking-widest text-muted"
+            src="/bobby/crew.png"
+            alt="Bobby and his crew of export workers"
+            className="h-11 w-auto md:h-13"
+          />
+          <motion.p
+            initial={hidden}
+            animate={shown}
+            transition={{ duration: 0.6, delay: 0.03, ease: EASE }}
+            className="mt-7 text-xs font-medium uppercase tracking-[0.22em] text-muted"
           >
-            For factories that export
+            A sales team with zero humans on it
           </motion.p>
           <motion.h1
             initial={hidden}
             animate={shown}
             transition={{ duration: 0.6, delay: 0.05, ease: EASE }}
-            className="mt-4 text-5xl font-semibold leading-[1.08] tracking-[-0.028em] text-ink md:text-6xl"
+            className="mt-4 flex w-max items-center justify-center gap-[0.22em] whitespace-nowrap text-[clamp(1.55rem,5.2vw,4.5rem)] font-semibold leading-none tracking-[-0.028em] text-ink"
           >
-            Catalog in.
-            <br />
-            <span className="inline-block rounded-full bg-peach px-5 py-1">Contract</span>{' '}
-            out.
+            <motion.span layout className="shrink-0">
+              PDF in.
+            </motion.span>
+            <RotatingPill reduceMotion={reduceMotion} />
+            <motion.span layout className="shrink-0">
+              out.
+            </motion.span>
           </motion.h1>
           <motion.p
             initial={hidden}
@@ -580,21 +843,22 @@ export function Landing() {
             transition={{ duration: 0.6, delay: 0.12, ease: EASE }}
             className="mt-6 font-serif text-xl italic text-graphite"
           >
-            One agent, every buyer channel, zero inquiry desk.
+            Meet Bobby — an AI agent that sells a factory's furniture across
+            Europe. Finds buyers, negotiates, books lawyers. You only sign.
           </motion.p>
           <motion.div
             initial={hidden}
             animate={shown}
             transition={{ duration: 0.6, delay: 0.18, ease: EASE }}
-            className="mt-8 flex flex-wrap items-center gap-3"
+            className="mt-8 flex flex-wrap items-center justify-center gap-3"
           >
             <Tap>
-              <CtaLink to="/onboarding/catalog" variant="primary">
-                Start with your factory
+              <CtaLink to="/onboarding/catalog" variant="primary" size="lg">
+                Watch Bobby work
               </CtaLink>
             </Tap>
             <Tap>
-              <CtaLink to="/app/buyers" variant="ghost">
+              <CtaLink to="/app/buyers" variant="ghost" size="lg">
                 Open workspace
               </CtaLink>
             </Tap>
@@ -604,26 +868,45 @@ export function Landing() {
         <motion.div
           initial={hidden}
           animate={shown}
-          transition={{ duration: 0.6, delay: 0.24, ease: EASE }}
-          className="relative"
+          transition={{ duration: 0.7, delay: 0.26, ease: EASE }}
+          className="relative mx-auto mt-14 max-w-5xl"
         >
-          <RedSquiggle className="pointer-events-none absolute -top-5 -right-3 z-10 w-16 opacity-80 md:-right-5" />
-          <div className="rounded-2xl bg-marigold p-6">
-            <LiveWorkspaceCard reduceMotion={reduceMotion} />
-          </div>
+          {HERO_STICKERS.map((sticker) => (
+            <motion.img
+              key={sticker.icon}
+              src={sticker.icon}
+              alt=""
+              aria-hidden
+              animate={reduceMotion ? undefined : { y: [0, -9, 0] }}
+              transition={{
+                duration: 3.6,
+                repeat: Infinity,
+                ease: 'easeInOut',
+                delay: sticker.delay,
+              }}
+              className={`absolute z-10 h-11 w-11 rounded-full shadow-[0_4px_12px_rgba(15,15,15,0.18)] md:h-13 md:w-13 ${sticker.className}`}
+              style={{ rotate: `${sticker.rotate}deg` }}
+            />
+          ))}
+          <HeroWorkspaceMock />
         </motion.div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-6 py-20">
-        <motion.h2
+      <section className="border-y border-black/6 bg-bg">
+        <div className="mx-auto max-w-6xl px-6 py-24">
+        <motion.div
           initial={hidden}
           whileInView={shown}
           viewport={VIEW}
           transition={{ duration: 0.6, ease: EASE }}
-          className="text-4xl font-semibold tracking-[-0.02em] text-ink"
         >
-          Bobby works where your buyers are.
-        </motion.h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">
+            What Bobby does
+          </p>
+          <h2 className="mt-3 text-4xl font-semibold tracking-[-0.02em] text-ink">
+            Bobby works where your buyers are.
+          </h2>
+        </motion.div>
 
         <motion.div
           initial="hidden"
@@ -639,8 +922,8 @@ export function Landing() {
             }}
           >
             <FeatureCard
-              eyebrow="Read the catalog"
-              title="Every SKU, straight out of the PDF."
+              eyebrow="Read the product PDF"
+              title="Every product, priced and structured."
               to="/onboarding/catalog"
             >
               <MiniCatalogMock />
@@ -688,52 +971,25 @@ export function Landing() {
             </div>
           </div>
         </motion.div>
+        </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-6 py-20">
+      <section className="mx-auto max-w-6xl px-6 py-24">
         <motion.div
           initial={hidden}
           whileInView={shown}
           viewport={VIEW}
           transition={{ duration: 0.6, ease: EASE }}
-          className="mb-6 flex items-center gap-3"
+          className="mb-10"
         >
-          <BobbyFace expression="happy" size={44} />
-          <h2 className="text-3xl font-semibold tracking-tight text-ink">
-            A Tuesday, for Bobby.
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">
+            The difference
+          </p>
+          <h2 className="mt-3 text-4xl font-semibold tracking-[-0.02em] text-ink">
+            Same Tuesday. Two very different desks.
           </h2>
         </motion.div>
-        <motion.div
-          initial="hidden"
-          whileInView="show"
-          viewport={VIEW}
-          variants={{
-            hidden: {},
-            show: { transition: { staggerChildren: 0.1 } },
-          }}
-          className="overflow-hidden rounded-xl border border-black/8 bg-bg"
-        >
-          {TUESDAY_LOG.map((row, index) => (
-            <motion.div
-              key={row.time}
-              variants={{
-                hidden: hidden,
-                show: { ...shown, transition: { duration: 0.55, ease: EASE } },
-              }}
-              className={`flex items-baseline gap-4 px-5 py-3.5 ${
-                index < TUESDAY_LOG.length - 1 ? 'border-b border-black/8' : ''
-              }`}
-            >
-              <span className={`shrink-0 font-mono text-xs tabular-nums ${row.tint}`}>
-                {row.time}
-              </span>
-              <p className="text-sm leading-relaxed text-ink/80">{row.text}</p>
-            </motion.div>
-          ))}
-        </motion.div>
-      </section>
-
-      <section className="mx-auto grid max-w-6xl items-stretch gap-3 px-6 py-20 md:grid-cols-2">
+        <div className="grid items-stretch gap-3 md:grid-cols-2">
         <motion.div
           initial={reduceMotion ? shown : { opacity: 0, x: -28 }}
           whileInView={shown}
@@ -742,7 +998,7 @@ export function Landing() {
           className="overflow-hidden rounded-xl border border-black/8 bg-bg p-8"
         >
           <p className="text-xs font-semibold tracking-widest text-faint">
-            BEFORE · THE INQUIRY DESK
+            BEFORE · HUMANS DOING THIS
           </p>
 
           <div className="mt-6 -rotate-1 rounded-lg border border-black/8 bg-bg shadow-[0_2px_8px_rgba(15,15,15,0.06)]">
@@ -834,16 +1090,15 @@ export function Landing() {
           <p className="mt-auto pt-6 font-serif text-lg italic leading-snug text-white">
             Nothing reaches you until there's a contract to sign.
           </p>
-        </motion.div>
-      </section>
+          </motion.div>
+        </div>
 
-      <section className="mx-auto max-w-6xl px-6 pt-4 pb-2">
         <motion.p
           initial={hidden}
           whileInView={shown}
           viewport={VIEW}
           transition={{ duration: 0.5, ease: EASE }}
-          className="mb-4 text-xs text-muted"
+          className="mt-14 mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-accent"
         >
           See what Bobby can do
         </motion.p>
@@ -884,22 +1139,20 @@ export function Landing() {
         </motion.div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-6 py-20">
-        <motion.div
-          initial={hidden}
-          whileInView={shown}
-          viewport={VIEW}
-          transition={{ duration: 0.65, ease: EASE }}
-          className="rounded-2xl bg-sky-wash px-6 py-16"
-        >
-          <h2 className="text-center text-3xl font-semibold tracking-tight text-ink">
-            Stop hiring inquiry desks.
-          </h2>
-          <div className="mt-8">
+      <section className="border-t border-black/6 bg-bg">
+        <div className="mx-auto max-w-6xl px-6 py-24">
+          <motion.div
+            initial={hidden}
+            whileInView={shown}
+            viewport={VIEW}
+            transition={{ duration: 0.65, ease: EASE }}
+            className="rounded-2xl bg-sky-wash px-6 py-14 md:px-12"
+          >
             <UnlockChecklist reduceMotion={reduceMotion} />
-          </div>
-        </motion.div>
+          </motion.div>
+        </div>
       </section>
+
     </div>
   )
 }
