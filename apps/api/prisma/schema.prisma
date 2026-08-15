@@ -1,0 +1,426 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RunMode {
+  FAKE
+  JUDGE
+}
+
+enum DemoRunStatus {
+  CREATED
+  AWAITING_PAYMENT
+  STUDY_RUNNING
+  AWAITING_CAMPAIGN_APPROVAL
+  RUNNING
+  AWAITING_OWNER_SIGNATURE
+  COMPLETE
+  PAUSED
+  FAILED
+}
+
+enum PilotStatus {
+  PENDING
+  PAID
+}
+
+enum RevisionStatus {
+  DRAFT
+  UNDER_STUDY
+  READY_FOR_APPROVAL
+  ACTIVE
+  SUPERSEDED
+}
+
+enum OpportunityStage {
+  RESEARCHING
+  OUTREACH
+  ENGAGED
+  NEGOTIATING
+  AGREEMENT
+  SIGNING
+  SIGNED
+  PAUSED
+  LOST
+}
+
+enum Provider {
+  STRIPE
+  TERAC
+  LINQ
+  BAND
+  RENDER
+  DOCUMENSO
+  MONID
+  OPENAI
+  LOCAL
+}
+
+enum ProviderActionStatus {
+  PLANNED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  RECONCILE_REQUIRED
+}
+
+enum ApprovalKind {
+  CAMPAIGN
+  OWNER_SIGNATURE
+}
+
+enum ApprovalDecision {
+  APPROVE
+  REJECT
+}
+
+enum RenderTaskTriggerStatus {
+  PLANNED
+  TRIGGERING
+  TRIGGERED
+  FAILED
+}
+
+enum PaymentProviderMode {
+  TEST
+  LIVE
+  FAKE
+}
+
+model Workspace {
+  id              String           @id @default(cuid())
+  name            String
+  ownerEmail      String
+  killSwitch      Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  pilotActivation PilotActivation?
+  campaigns       Campaign[]
+  demoRuns        DemoRun[]
+}
+
+model PilotActivation {
+  id          String      @id @default(cuid())
+  workspaceId String      @unique
+  status      PilotStatus @default(PENDING)
+  amount      Int         @default(500)
+  currency    String      @default("usd")
+  checkoutUrl String?
+  paidAt      DateTime?
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  payments    Payment[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model Campaign {
+  id               String             @id @default(cuid())
+  workspaceId      String
+  name             String
+  activeRevisionId String?            @unique
+  workspace        Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  revisions        CampaignRevision[] @relation("CampaignRevisions")
+  activeRevision   CampaignRevision?  @relation("ActiveRevision", fields: [activeRevisionId], references: [id])
+  opportunities    Opportunity[]
+  demoRuns         DemoRun[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+}
+
+model CampaignRevision {
+  id              String         @id @default(cuid())
+  campaignId      String
+  label           String
+  body            Json
+  status          RevisionStatus @default(DRAFT)
+  campaign        Campaign       @relation("CampaignRevisions", fields: [campaignId], references: [id], onDelete: Cascade)
+  activeFor       Campaign?      @relation("ActiveRevision")
+  studyCandidates HumanStudy[]   @relation("SelectedRevision")
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+model DemoRun {
+  id                String             @id @default(cuid())
+  workspaceId       String
+  campaignId        String
+  eventSequence     Int                @default(0)
+  status            DemoRunStatus      @default(CREATED)
+  mode              RunMode            @default(FAKE)
+  startedAt         DateTime?
+  completedAt       DateTime?
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign          Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  payments          Payment[]
+  humanStudies      HumanStudy[]
+  opportunities     Opportunity[]
+  messages          Message[]
+  agentHandoffs     AgentHandoff[]
+  workflowRuns      WorkflowRun[]
+  renderTaskIntents RenderTaskIntent[]
+  documents         Document[]
+  approvals         Approval[]
+  events            Event[]
+  providerEvents    ProviderEvent[]
+  providerActions   ProviderAction[]
+  companies         Company[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([status, createdAt])
+}
+
+model Payment {
+  id                String              @id @default(cuid())
+  demoRunId         String
+  pilotActivationId String
+  provider          Provider            @default(STRIPE)
+  providerMode      PaymentProviderMode @default(TEST)
+  stripeEventId     String?             @unique
+  checkoutSessionId String?             @unique
+  paymentIntentId   String?
+  livemode          Boolean
+  amount            Int
+  currency          String
+  status            String
+  occurredAt        DateTime            @default(now())
+  demoRun           DemoRun             @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+  pilotActivation   PilotActivation     @relation(fields: [pilotActivationId], references: [id], onDelete: Cascade)
+}
+
+model HumanStudy {
+  id                 String           @id @default(cuid())
+  demoRunId          String
+  provider           Provider         @default(TERAC)
+  externalId         String
+  live               Boolean
+  status             String
+  baselineScore      Float
+  selectedScore      Float
+  scoreDelta         Float
+  respondentCount    Int?
+  rubric             Json
+  selectedRevisionId String
+  occurredAt         DateTime         @default(now())
+  demoRun            DemoRun          @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+  selectedRevision   CampaignRevision @relation("SelectedRevision", fields: [selectedRevisionId], references: [id])
+
+  @@unique([provider, externalId])
+}
+
+model Company {
+  id              String        @id @default(cuid())
+  demoRunId       String
+  name            String
+  website         String?
+  city            String?
+  country         String
+  focus           String
+  monidProviderId String?
+  monidLive       Boolean       @default(false)
+  researchOnly    Boolean       @default(true)
+  demoRun         DemoRun       @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+  contacts        Contact[]
+  opportunities   Opportunity[]
+  createdAt       DateTime      @default(now())
+
+  @@unique([demoRunId, name])
+}
+
+model Contact {
+  id            String        @id @default(cuid())
+  companyId     String
+  name          String
+  title         String?
+  channel       String?
+  addressHash   String?
+  consented     Boolean       @default(false)
+  rolePlayer    Boolean       @default(false)
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  opportunities Opportunity[]
+  createdAt     DateTime      @default(now())
+}
+
+model Opportunity {
+  id          String           @id @default(cuid())
+  demoRunId   String
+  campaignId  String
+  companyId   String
+  contactId   String?
+  stage       OpportunityStage @default(RESEARCHING)
+  stageReason String?
+  version     Int              @default(0)
+  sequence    Int              @default(0)
+  demoRun     DemoRun          @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+  campaign    Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact     Contact?         @relation(fields: [contactId], references: [id])
+  messages    Message[]
+  documents   Document[]
+  events      Event[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([demoRunId, companyId])
+  @@index([demoRunId, stage])
+}
+
+model Message {
+  id               String      @id @default(cuid())
+  demoRunId        String
+  opportunityId    String
+  provider         Provider    @default(LINQ)
+  externalId       String?
+  threadExternalId String?
+  direction        String
+  status           String
+  sanitizedBody    String
+  rolePlayer       Boolean
+  live             Boolean     @default(false)
+  occurredAt       DateTime    @default(now())
+  demoRun          DemoRun     @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+  opportunity      Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalId])
+}
+
+model AgentHandoff {
+  id         String   @id @default(cuid())
+  demoRunId  String
+  provider   Provider @default(BAND)
+  roomId     String
+  live       Boolean
+  status     String
+  verdict    Json
+  occurredAt DateTime @default(now())
+  demoRun    DemoRun  @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, roomId])
+}
+
+model WorkflowRun {
+  id         String   @id @default(cuid())
+  demoRunId  String
+  provider   Provider @default(RENDER)
+  externalId String
+  taskSlug   String
+  live       Boolean
+  status     String
+  attempt    Int
+  retried    Boolean  @default(false)
+  occurredAt DateTime @default(now())
+  demoRun    DemoRun  @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalId])
+}
+
+model RenderTaskIntent {
+  id              String                  @id @default(cuid())
+  demoRunId       String
+  taskSlug        String
+  externalId      String?                 @unique
+  triggerStatus   RenderTaskTriggerStatus @default(PLANNED)
+  triggerAttempts Int                     @default(0)
+  triggerToken    String?                 @unique
+  lastError       String?
+  leaseExpiresAt  DateTime?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  demoRun         DemoRun                 @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+
+  @@unique([demoRunId, taskSlug])
+  @@index([triggerStatus, leaseExpiresAt])
+}
+
+model Document {
+  id            String      @id @default(cuid())
+  demoRunId     String
+  opportunityId String
+  provider      Provider    @default(DOCUMENSO)
+  externalId    String
+  live          Boolean
+  status        String
+  ownerSignedAt DateTime?
+  buyerSignedAt DateTime?
+  completedAt   DateTime?
+  occurredAt    DateTime    @default(now())
+  demoRun       DemoRun     @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalId])
+}
+
+model Approval {
+  id         String           @id @default(cuid())
+  demoRunId  String
+  kind       ApprovalKind
+  decision   ApprovalDecision
+  actor      String
+  occurredAt DateTime         @default(now())
+  demoRun    DemoRun          @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+
+  @@unique([demoRunId, kind])
+}
+
+model Event {
+  id            String       @id @default(cuid())
+  demoRunId     String
+  opportunityId String?
+  sequence      Int
+  type          String
+  status        String
+  summary       String
+  actor         String
+  proofRef      String?
+  occurredAt    DateTime     @default(now())
+  demoRun       DemoRun      @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@unique([opportunityId, sequence])
+  @@unique([demoRunId, sequence])
+  @@index([demoRunId, occurredAt])
+}
+
+model ProviderEvent {
+  id                  String    @id @default(cuid())
+  demoRunId           String
+  provider            Provider
+  externalEventId     String
+  eventType           String
+  payloadHash         String
+  processedAt         DateTime?
+  processingToken     String?
+  processingExpiresAt DateTime?
+  receivedAt          DateTime  @default(now())
+  demoRun             DemoRun   @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalEventId])
+}
+
+model ProviderAction {
+  id                 String               @id @default(cuid())
+  demoRunId          String
+  provider           Provider
+  kind               String
+  idempotencyKey     String               @unique
+  status             ProviderActionStatus @default(PLANNED)
+  live               Boolean              @default(false)
+  attempts           Int                  @default(0)
+  request            Json
+  providerExternalId String?
+  redactedResponse   Json?
+  lastError          String?
+  leaseToken         String?
+  leaseExpiresAt     DateTime?
+  runAfter           DateTime             @default(now())
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  demoRun            DemoRun              @relation(fields: [demoRunId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAfter])
+}

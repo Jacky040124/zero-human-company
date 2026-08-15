@@ -5,17 +5,21 @@ import {
   contractClauses,
   contractMeta,
   getLead,
+  leadStatusLabel,
   teracCall,
   teracLawyer,
   teracReview,
 } from '../../data'
-import { StatusPill } from '../../components/ui'
+import { ButtonLink, StatusPill } from '../../components/ui'
+import { useDemo } from '../../state/DemoContext'
 
 type Stage = 'draft' | 'calling' | 'matched' | 'reviewed'
 
 export function Contract() {
   const { id } = useParams()
-  const lead = getLead(id ?? 'nordlicht')
+  const { leads, apiConnected } = useDemo()
+  const runtimeLead = leads.find((item) => item.id === id)
+  const lead = apiConnected ? runtimeLead : runtimeLead ?? getLead(id ?? 'nordlicht')
   const [stage, setStage] = useState<Stage>('draft')
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([])
 
@@ -30,6 +34,93 @@ export function Contract() {
   }
 
   const reviewed = stage === 'reviewed'
+
+  if (!lead) {
+    return (
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight text-ink">Opportunity not found</h1>
+        <p className="mt-2 text-sm text-muted">
+          This opportunity is not present in the active persisted run, so no contract information
+          is available.
+        </p>
+        <div className="mt-6">
+          <ButtonLink to="/app/buyers">Return to Pipeline</ButtonLink>
+        </div>
+      </div>
+    )
+  }
+
+  if (apiConnected) {
+    return (
+      <div>
+        <p className="text-sm text-muted">
+          <Link to="/app/buyers" className="text-muted no-underline hover:text-ink">
+            Buyers
+          </Link>
+          <span className="mx-2">/</span>
+          <Link
+            to={`/app/leads/${lead.id}`}
+            className="text-muted no-underline hover:text-ink"
+          >
+            {lead.company}
+          </Link>
+          <span className="mx-2">/</span>
+          Contract
+        </p>
+
+        <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight text-ink">
+              Persisted opportunity
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
+              Detailed contract contents are not available from the current API. Workflow status
+              is controlled by the persisted run.
+            </p>
+          </div>
+          <StatusPill
+            tone={lead.runtimeStage === 'PAUSED' || lead.runtimeStage === 'LOST' ? 'warn' : 'live'}
+          >
+            {leadStatusLabel(lead)}
+          </StatusPill>
+        </div>
+
+        <div className="mt-8 grid gap-6 xl:grid-cols-[0.9fr_1.2fr]">
+          <div className="space-y-4">
+            <section className="rounded-lg border border-line bg-ink p-5 text-white">
+              <p className="text-xs text-white/50">Persisted workflow</p>
+              <p className="mt-3 text-lg font-semibold leading-snug tracking-tight">
+                {leadStatusLabel(lead)}
+              </p>
+              <p className="mt-4 text-xs text-white/55">
+                Contract review and signing are controlled by the persisted run.
+              </p>
+            </section>
+          </div>
+
+          <article className="rounded-lg border border-line bg-bg p-6 md:p-8">
+            <p className="text-xs text-muted">Current API opportunity summary</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-ink">
+              {lead.company}
+            </h2>
+            <p className="mt-2 text-sm text-muted">
+              {lead.buyer}, {lead.title} · {lead.city}, {lead.country}
+            </p>
+            <div className="mt-8 space-y-6">
+              <section>
+                <h3 className="text-sm font-medium text-ink">Focus</h3>
+                <p className="mt-2 text-sm leading-relaxed text-ink">{lead.focus}</p>
+              </section>
+              <section>
+                <h3 className="text-sm font-medium text-ink">Latest persisted run summary</h3>
+                <p className="mt-2 text-sm leading-relaxed text-ink">{lead.lastAction}</p>
+              </section>
+            </div>
+          </article>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>

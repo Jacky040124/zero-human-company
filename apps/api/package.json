@@ -1,0 +1,49 @@
+{
+  "name": "@zero-human/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "start:band-agents": "node dist/band-agents.js",
+    "start:workflows": "node dist/render-workflows.js",
+    "dev:band-agents": "tsx src/band-agents.ts",
+    "dev:workflows": "tsx src/render-workflows.ts",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "db:generate": "prisma generate",
+    "db:migrate": "node --env-file-if-exists=../../.env.local ../../node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma",
+    "db:reset": "node --env-file-if-exists=../../.env.local ../../node_modules/prisma/build/index.js migrate reset --force --schema prisma/schema.prisma",
+    "demo:seed": "tsx src/cli.ts seed",
+    "demo:run": "tsx src/cli.ts run",
+    "judge:preflight": "tsx src/cli.ts preflight",
+    "demo:verify": "tsx src/cli.ts verify"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "@band-ai/sdk": "^0.1.10",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/static": "^10.1.3",
+    "@openai/codex-sdk": "^0.147.0",
+    "@prisma/client": "^6.19.2",
+    "@renderinc/sdk": "^0.6.0",
+    "@zero-human/contracts": "0.1.0",
+    "dotenv": "^16.6.1",
+    "fastify": "^5.7.4",
+    "fastify-raw-body": "^5.0.0",
+    "openai": "^6.27.0",
+    "stripe": "^20.4.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "prisma": "^6.19.2",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.2",
+    "vitest": "^4.0.18"
+  }
+}

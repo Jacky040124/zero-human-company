@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Funnel, FunnelChart, LabelList, ResponsiveContainer } from 'recharts'
 import { useDemo } from '../../state/DemoContext'
+import { RunControl } from '../../components/RunControl'
 
 const EASE = [0.16, 1, 0.3, 1] as const
 
@@ -14,7 +15,7 @@ const STAGE_FILL = {
 } as const
 
 export function Dashboard() {
-  const { leads, activity } = useDemo()
+  const { leads, activity, apiConnected, runtimeError } = useDemo()
   const reduceMotion = Boolean(useReducedMotion())
 
   const stats = useMemo(() => {
@@ -22,9 +23,10 @@ export function Dashboard() {
     let negotiating = 0
     let contracts = 0
     for (const lead of leads) {
-      if (lead.status === 'contacted') inConversation += 1
-      if (lead.status === 'negotiating') negotiating += 1
-      if (lead.status === 'contract') contracts += 1
+      const stopped = lead.runtimeStage === 'PAUSED' || lead.runtimeStage === 'LOST'
+      if (lead.status === 'contacted' && !stopped) inConversation += 1
+      if (lead.status === 'negotiating' && !stopped) negotiating += 1
+      if (lead.status === 'contract' && !stopped) contracts += 1
     }
     return {
       found: leads.length,
@@ -39,11 +41,12 @@ export function Dashboard() {
     let negotiating = 0
     let contract = 0
     for (const lead of leads) {
-      if (lead.status === 'contacted' || lead.status === 'negotiating' || lead.status === 'contract') {
+      const stopped = lead.runtimeStage === 'PAUSED' || lead.runtimeStage === 'LOST'
+      if (!stopped && (lead.status === 'contacted' || lead.status === 'negotiating' || lead.status === 'contract')) {
         contacted += 1
       }
-      if (lead.status === 'negotiating' || lead.status === 'contract') negotiating += 1
-      if (lead.status === 'contract') contract += 1
+      if (!stopped && (lead.status === 'negotiating' || lead.status === 'contract')) negotiating += 1
+      if (!stopped && lead.status === 'contract') contract += 1
     }
     return [
       { name: 'Found', value: leads.length, fill: STAGE_FILL.found, label: `Found  ${leads.length}` },
@@ -54,14 +57,25 @@ export function Dashboard() {
   }, [leads])
 
   const needsYou = useMemo(
-    () => leads.filter((lead) => lead.status === 'contract'),
+    () => leads.filter(
+      (lead) => lead.status === 'contract'
+        && lead.runtimeStage !== 'PAUSED'
+        && lead.runtimeStage !== 'LOST',
+    ),
     [leads],
   )
-
   return (
     <div>
       <h1 className="text-3xl font-semibold tracking-tight text-ink">Dashboard</h1>
-      <p className="mt-1 text-sm text-muted">What the agent is doing right now.</p>
+      <p className="mt-1 text-sm text-muted">
+        {apiConnected
+          ? 'Persisted activity snapshot.'
+          : runtimeError
+            ? 'Offline · local preview activity.'
+            : 'Local preview · simulated activity.'}
+      </p>
+
+      <RunControl />
 
       <div className="mt-6 grid grid-cols-4 gap-3">
         <StatCard label="Buyers found" value={stats.found} />
@@ -70,10 +84,10 @@ export function Dashboard() {
         <StatCard label="Contracts" value={stats.contracts} />
       </div>
 
-      {needsYou.length > 0 ? (
+      {!apiConnected && needsYou.length > 0 ? (
         <div className="mt-5 rounded-xl border border-black/8 bg-bg px-4 py-3">
           <p className="text-[0.65rem] font-medium uppercase tracking-widest text-muted">
-            Needs you
+            Local preview · Needs you
           </p>
           {needsYou.map((lead) => (
             <Link
@@ -103,7 +117,7 @@ export function Dashboard() {
                   legendType="none"
                   tooltipType="none"
                   stroke="#ffffff"
-                  isAnimationActive={reduceMotion ? false : 'auto'}
+                  isAnimationActive={false}
                 >
                   <LabelList
                     dataKey="label"
@@ -120,7 +134,11 @@ export function Dashboard() {
 
         <div className="rounded-xl border border-black/8 bg-bg px-4 py-3">
           <p className="text-[0.65rem] font-medium uppercase tracking-widest text-muted">
-            Live
+            {apiConnected
+              ? 'Persisted API snapshot'
+              : runtimeError
+                ? 'Offline local preview'
+                : 'Local preview activity'}
           </p>
           <div className="mt-1.5">
             <AnimatePresence initial={false}>

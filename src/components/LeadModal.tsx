@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import { statusLabel } from '../data'
+import { motion, useReducedMotion } from 'framer-motion'
+import { leadStatusLabel } from '../data'
 import type { Lead, LeadStatus } from '../data'
 import { useDemo } from '../state/DemoContext'
 import { LeadProgress } from './LeadProgress'
@@ -22,14 +22,18 @@ type LeadModalProps = {
 }
 
 function TypingDots() {
+  const reduceMotion = useReducedMotion()
+
   return (
     <span className="inline-flex items-center gap-0.5 py-1">
       {[0, 1, 2].map((index) => (
         <motion.span
           key={index}
           className="h-1 w-1 rounded-full bg-muted"
-          animate={{ opacity: [0.25, 1, 0.25] }}
-          transition={{ duration: 0.9, repeat: Infinity, delay: index * 0.16 }}
+          animate={{ opacity: reduceMotion ? 0.65 : [0.25, 1, 0.25] }}
+          transition={reduceMotion
+            ? { duration: 0 }
+            : { duration: 0.9, repeat: Infinity, delay: index * 0.16 }}
         />
       ))}
     </span>
@@ -37,26 +41,112 @@ function TypingDots() {
 }
 
 export function LeadModal({ lead, onClose }: LeadModalProps) {
-  const { threads, leadAutonomy, setLeadAutonomy, sendLeadMessage, leadTyping } = useDemo()
+  const {
+    threads,
+    leadAutonomy,
+    setLeadAutonomy,
+    sendLeadMessage,
+    leadTyping,
+    apiConnected,
+  } = useDemo()
   const messages = threads[lead.id] ?? []
   const autonomous = leadAutonomy[lead.id] ?? true
   const typing = Boolean(leadTyping[lead.id])
   const [draft, setDraft] = useState('')
+  const overlayRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+    const overlay = overlayRef.current
+    const dialog = dialogRef.current
+    if (!overlay || !dialog) return
+    if (!previouslyFocusedRef.current && document.activeElement instanceof HTMLElement) {
+      previouslyFocusedRef.current = document.activeElement
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
 
-  useEffect(() => {
-    const previous = document.body.style.overflow
+    const inertedElements: Array<{
+      element: HTMLElement
+      hadInertAttribute: boolean
+      inertAttributeValue: string | null
+    }> = []
+    let branch: HTMLElement = overlay
+    let parent = branch.parentElement
+
+    while (parent) {
+      for (const sibling of Array.from(parent.children)) {
+        if (sibling === branch || !(sibling instanceof HTMLElement)) continue
+        inertedElements.push({
+          element: sibling,
+          hadInertAttribute: sibling.hasAttribute('inert'),
+          inertAttributeValue: sibling.getAttribute('inert'),
+        })
+        sibling.inert = true
+      }
+      if (parent === document.body) break
+      branch = parent
+      parent = parent.parentElement
+    }
+
+    const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+
+    closeButtonRef.current?.focus()
+    if (document.activeElement !== closeButtonRef.current) dialog.focus()
+
+    const getFocusableElements = () => Array.from(dialog.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]',
+    )).filter((element) => !element.hasAttribute('hidden') && element.getClientRects().length > 0)
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        onCloseRef.current()
+        return
+      }
+
+      if (event.key !== 'Tab') return
+      const focusableElements = getFocusableElements()
+      if (focusableElements.length === 0) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+
+      const first = focusableElements[0]
+      const last = focusableElements[focusableElements.length - 1]
+      const activeElement = document.activeElement
+      if (!dialog.contains(activeElement)) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+      } else if (event.shiftKey && activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown, true)
+
     return () => {
-      document.body.style.overflow = previous
+      document.removeEventListener('keydown', onKeyDown, true)
+      document.body.style.overflow = previousOverflow
+      for (const { element, hadInertAttribute, inertAttributeValue } of inertedElements) {
+        if (hadInertAttribute) {
+          element.setAttribute('inert', inertAttributeValue ?? '')
+        } else {
+          element.removeAttribute('inert')
+        }
+      }
+      const previouslyFocused = previouslyFocusedRef.current
+      if (previouslyFocused?.isConnected) previouslyFocused.focus()
     }
   }, [])
 
@@ -79,13 +169,16 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
 
   return (
     <div
+      ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,15,15,0.6)] p-4"
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="lead-modal-title"
+        tabIndex={-1}
         className={`flex max-h-[85vh] w-full max-w-2xl flex-col rounded-lg bg-bg ${overlayShadow}`}
         onClick={(event) => event.stopPropagation()}
       >
@@ -111,12 +204,17 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
             </div>
             <div className="flex shrink-0 items-center gap-3">
               <div className="text-right">
-                <p className={`text-xs font-medium ${statusText[lead.status]}`}>
-                  {statusLabel[lead.status]}
+                <p className={`text-xs font-medium ${
+                  lead.runtimeStage === 'PAUSED' || lead.runtimeStage === 'LOST'
+                    ? 'text-warn'
+                    : statusText[lead.status]
+                }`}>
+                  {leadStatusLabel(lead)}
                 </p>
                 <p className="mt-0.5 text-[11px] text-faint">{lead.worker}</p>
               </div>
               <button
+                ref={closeButtonRef}
                 type="button"
                 aria-label="Close"
                 onClick={onClose}
@@ -132,6 +230,17 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
         </header>
 
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-canvas px-5 py-4">
+          {apiConnected ? (
+            <div className="rounded-lg border border-line bg-bg px-4 py-3">
+              <p className="text-[0.65rem] font-medium uppercase tracking-widest text-muted">
+                Latest persisted run summary
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-ink">{lead.lastAction}</p>
+              <p className="mt-2 text-xs text-muted">
+                Individual buyer messages are not exposed by the current API.
+              </p>
+            </div>
+          ) : (
           <div className="space-y-3">
             {messages.map((message) => {
               const mine = message.role !== 'buyer'
@@ -168,9 +277,17 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
               </div>
             ) : null}
           </div>
+          )}
         </div>
 
         <footer className="shrink-0 border-t border-line px-5 py-3">
+          {apiConnected ? (
+            <p className="text-xs text-muted">
+              Read-only persisted opportunity record. Messaging and per-buyer autonomy controls are unavailable in
+              the current backend contract.
+            </p>
+          ) : (
+          <>
           <div className="flex items-center justify-between gap-3">
             <label className="flex cursor-pointer items-center gap-2 text-sm text-ink">
               <span>Autopilot</span>
@@ -198,6 +315,7 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
           {!autonomous ? (
             <div className="mt-3 flex items-center gap-2">
               <input
+                aria-label={`Message to ${lead.buyer}`}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={(event) => {
@@ -218,6 +336,8 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
               </button>
             </div>
           ) : null}
+          </>
+          )}
         </footer>
       </div>
     </div>

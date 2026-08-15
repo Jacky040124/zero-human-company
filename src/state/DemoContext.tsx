@@ -17,6 +17,14 @@ import {
 } from '../data'
 import type { Lead } from '../data'
 import type { ThreadMessage } from '../data/thread'
+import type { DemoRunSnapshot, OpportunityStage } from '@zero-human/contracts'
+import {
+  activatePilot as activatePilotRequest,
+  decideCampaign as decideCampaignRequest,
+  getActiveRun,
+  loginOwner as loginOwnerRequest,
+  subscribeToRun,
+} from '../api/runtime'
 
 export type Activity = {
   id: number
@@ -138,6 +146,12 @@ type DemoState = {
   leadTyping: Record<string, boolean>
   startDiscovery: () => number
   discoveryRemaining: number
+  runtimeRun: DemoRunSnapshot | null
+  apiConnected: boolean
+  runtimeError: string | null
+  loginOwner: (email: string, password: string) => Promise<void>
+  activatePilot: () => Promise<void>
+  decideCampaign: (decision: 'APPROVE' | 'REJECT') => Promise<void>
 }
 
 const DemoContext = createContext<DemoState | null>(null)
@@ -158,6 +172,18 @@ function seedLeadThreads(list: Lead[]): Record<string, ThreadMessage[]> {
   return Object.fromEntries(list.map((lead) => [lead.id, makeThread(lead)]))
 }
 
+function runtimeStatus(stage: OpportunityStage): Lead['status'] {
+  if (stage === 'RESEARCHING') return 'sourcing'
+  if (stage === 'OUTREACH' || stage === 'ENGAGED') return 'contacted'
+  if (stage === 'NEGOTIATING' || stage === 'PAUSED') return 'negotiating'
+  if (stage === 'LOST') return 'contacted'
+  return 'contract'
+}
+
+function countryCode(country: string): string {
+  return ({ Germany: 'DE', Netherlands: 'NL', France: 'FR', Norway: 'NO', Denmark: 'DK' } as Record<string, string>)[country] ?? 'EU'
+}
+
 export function DemoProvider({ children }: { children: ReactNode }) {
   const [leads, setLeads] = useState<Lead[]>(seedLeads)
   const [activity, setActivity] = useState<Activity[]>([
@@ -175,15 +201,116 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     seedAutonomy(seedLeads),
   )
   const [leadTyping, setLeadTyping] = useState<Record<string, boolean>>({})
+  const [runtimeRun, setRuntimeRun] = useState<DemoRunSnapshot | null>(null)
+  const [apiConnected, setApiConnected] = useState(false)
+  const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const eventIndex = useRef(0)
   const activityId = useRef(1)
   const replyTimers = useRef<ReturnType<typeof setTimeout>[]>([])
   const pendingReplies = useRef<Record<string, number>>({})
   const leadsRef = useRef(leads)
   const msgSeq = useRef(0)
+  const runtimeOrder = useRef<{ runId: string; sequence: number; updatedAt: number } | null>(null)
   leadsRef.current = leads
 
+  const applyRuntime = useCallback((snapshot: DemoRunSnapshot) => {
+    const nextOrder = {
+      runId: snapshot.id,
+      sequence: snapshot.timeline.reduce((highest, event) => Math.max(highest, event.sequence), 0),
+      updatedAt: Date.parse(snapshot.updatedAt),
+    }
+    const currentOrder = runtimeOrder.current
+    if (
+      currentOrder?.runId === nextOrder.runId
+      && (
+        nextOrder.sequence < currentOrder.sequence
+        || (nextOrder.sequence === currentOrder.sequence && nextOrder.updatedAt < currentOrder.updatedAt)
+      )
+    ) {
+      return
+    }
+    runtimeOrder.current = nextOrder
+
+    const runtimeLeads = snapshot.opportunities.map((opportunity): Lead => ({
+      id: opportunity.id,
+      company: opportunity.company,
+      city: opportunity.city ?? opportunity.country,
+      country: opportunity.country,
+      countryCode: countryCode(opportunity.country),
+      buyer: opportunity.researchOnly ? 'Research only' : opportunity.contactName,
+      title: opportunity.researchOnly ? 'Research candidate' : 'Consenting role-player',
+      focus: opportunity.focus,
+      status: runtimeStatus(opportunity.stage),
+      worker: opportunity.researchOnly
+        ? 'Research only'
+        : opportunity.stage === 'PAUSED'
+          ? 'Policy Reviewer'
+          : 'Agent team',
+      lastAction: opportunity.stageReason ?? opportunity.stage.replaceAll('_', ' ').toLowerCase(),
+      containers: opportunity.company === 'Nordlicht Import GmbH' ? '2 × 40HQ' : 'n/a',
+      featured: opportunity.company === 'Nordlicht Import GmbH',
+      runtimeStage: opportunity.stage,
+    }))
+
+    setRuntimeRun(snapshot)
+    setApiConnected(true)
+    setRuntimeError(null)
+    setLeads(runtimeLeads)
+    setLeadAutonomyMap(Object.fromEntries(runtimeLeads.map((lead) => [lead.id, false])))
+    setThreads(Object.fromEntries(runtimeLeads.map((lead) => [lead.id, []])))
+    setLeadTyping({})
+    setActivity(
+      snapshot.timeline.slice(0, 8).map((event) => ({
+        id: event.sequence,
+        time: new Date(event.occurredAt).toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+        text: event.summary,
+      })),
+    )
+  }, [])
+
   useEffect(() => {
+    let cancelled = false
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    const loadActiveRun = () => {
+      void getActiveRun()
+        .then((snapshot) => {
+          if (cancelled) return
+          if (snapshot) {
+            applyRuntime(snapshot)
+            return
+          }
+          retryTimer = setTimeout(loadActiveRun, 5_000)
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return
+          setRuntimeError(error instanceof Error ? error.message : 'Runtime API unavailable')
+          retryTimer = setTimeout(loadActiveRun, 5_000)
+        })
+    }
+    loadActiveRun()
+    return () => {
+      cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
+    }
+  }, [applyRuntime])
+
+  const runtimeRunId = runtimeRun?.id
+
+  useEffect(() => {
+    if (!runtimeRunId) return
+    return subscribeToRun(
+      runtimeRunId,
+      applyRuntime,
+      () => setRuntimeError('Live updates are reconnecting'),
+    )
+  }, [applyRuntime, runtimeRunId])
+
+  useEffect(() => {
+    if (apiConnected || !autopilot) return
     const timer = setInterval(() => {
       const event = scriptedEvents[eventIndex.current]
       if (!event) {
@@ -224,7 +351,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     }, 3500)
 
     return () => clearInterval(timer)
-  }, [])
+  }, [apiConnected, autopilot])
 
   useEffect(() => {
     return () => {
@@ -235,6 +362,10 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const sendLeadMessage = useCallback((id: string, body: string) => {
     const trimmed = body.trim()
     if (!trimmed) return
+    if (apiConnected) {
+      setRuntimeError('Manual sends are disabled during an autonomous run.')
+      return
+    }
 
     const outboundId = `${id}-manual-${++msgSeq.current}`
     setThreads((current) => ({
@@ -273,7 +404,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       }
     }, 2500)
     replyTimers.current.push(timer)
-  }, [])
+  }, [apiConnected])
 
   const sendMessage = useCallback(
     (body: string) => {
@@ -283,12 +414,20 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   )
 
   const setLeadAutonomy = useCallback((id: string, value: boolean) => {
+    if (apiConnected) {
+      setRuntimeError('Per-buyer autonomy is read-only during a connected run.')
+      return
+    }
     setLeadAutonomyMap((current) => ({ ...current, [id]: value }))
-  }, [])
+  }, [apiConnected])
 
   const DISCOVERY_BATCH = 3
 
   const startDiscovery = useCallback(() => {
+    if (apiConnected) {
+      setRuntimeError('Discovery is controlled by the connected backend run.')
+      return 0
+    }
     const existing = new Set(leadsRef.current.map((lead) => lead.id))
     const next = discoveryLeads.filter((lead) => !existing.has(lead.id)).slice(0, DISCOVERY_BATCH)
     if (next.length === 0) return 0
@@ -313,11 +452,29 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       ].slice(0, 8),
     )
     return next.length
-  }, [])
+  }, [apiConnected])
 
-  const discoveryRemaining = discoveryLeads.filter(
-    (lead) => !leads.some((item) => item.id === lead.id),
-  ).length
+  const discoveryRemaining = apiConnected
+    ? 0
+    : discoveryLeads.filter((lead) => !leads.some((item) => item.id === lead.id)).length
+
+  const loginOwner = useCallback(async (email: string, password: string) => {
+    await loginOwnerRequest(email, password)
+    setRuntimeError(null)
+    const snapshot = await getActiveRun()
+    if (snapshot) applyRuntime(snapshot)
+  }, [applyRuntime])
+
+  const activatePilot = useCallback(async () => {
+    if (!runtimeRun) throw new Error('No active run')
+    const checkoutUrl = await activatePilotRequest(runtimeRun.id)
+    window.location.assign(checkoutUrl)
+  }, [runtimeRun])
+
+  const decideCampaign = useCallback(async (decision: 'APPROVE' | 'REJECT') => {
+    if (!runtimeRun) throw new Error('No active run')
+    applyRuntime(await decideCampaignRequest(runtimeRun.id, decision))
+  }, [applyRuntime, runtimeRun])
 
   const thread = threads.nordlicht ?? []
   const buyerTyping = Boolean(leadTyping.nordlicht)
@@ -341,6 +498,12 @@ export function DemoProvider({ children }: { children: ReactNode }) {
         leadTyping,
         startDiscovery,
         discoveryRemaining,
+        runtimeRun,
+        apiConnected,
+        runtimeError,
+        loginOwner,
+        activatePilot,
+        decideCampaign,
       }}
     >
       {children}

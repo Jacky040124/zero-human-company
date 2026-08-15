@@ -20,7 +20,7 @@ const FOUND_TOTAL = SOURCES.reduce((sum, source) => sum + source.found, 0)
 type Phase = 'idle' | 'scanning' | 'done'
 
 export function Discovery() {
-  const { startDiscovery, discoveryRemaining } = useDemo()
+  const { startDiscovery, discoveryRemaining, apiConnected, runtimeError } = useDemo()
   const reduceMotion = Boolean(useReducedMotion())
   const [phase, setPhase] = useState<Phase>('idle')
   const [activeIndex, setActiveIndex] = useState(0)
@@ -29,7 +29,7 @@ export function Discovery() {
   finishRef.current = startDiscovery
 
   const scanning = phase === 'scanning'
-  const canStart = !scanning && discoveryRemaining > 0
+  const canStart = !apiConnected && !scanning && discoveryRemaining > 0
   const found = SOURCES.slice(0, Math.min(activeIndex, SOURCES.length)).reduce(
     (sum, source) => sum + source.found,
     0,
@@ -81,7 +81,13 @@ export function Discovery() {
   return (
     <div>
       <h1 className="text-3xl font-semibold tracking-tight text-ink">Discovery</h1>
-      <p className="mt-1 text-sm text-muted">Scan sources. New buyers land in Pipeline.</p>
+      <p className="mt-1 text-sm text-muted">
+        {apiConnected
+          ? 'Discovery is controlled by the persisted workflow.'
+          : runtimeError
+            ? 'Offline · local preview with fixture buyers.'
+            : 'Local preview animation · add fixture buyers to the Pipeline.'}
+      </p>
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
@@ -96,6 +102,8 @@ export function Discovery() {
         >
           {scanning
             ? 'Scanning…'
+            : apiConnected
+              ? 'Managed by persisted workflow'
             : discoveryRemaining === 0 && lastAdded !== null
               ? `Round complete · ${lastAdded} added`
               : 'Start new round'}

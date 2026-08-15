@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { Logo } from '../../components/Logo'
-import { LiveDot, StatusPill } from '../../components/ui'
+import { StatusPill } from '../../components/ui'
 import { factory } from '../../data'
 import { useDemo } from '../../state/DemoContext'
 
@@ -13,8 +13,13 @@ const nav = [
 ]
 
 export function AppShell() {
-  const { leads, autopilot, setAutopilot } = useDemo()
-  const liveWorkers = leads.filter((lead) => lead.status !== 'contract').length
+  const { leads, autopilot, setAutopilot, apiConnected, runtimeRun, runtimeError } = useDemo()
+  const activeOpportunities = leads.filter(
+    (lead) => lead.status !== 'contract'
+      && lead.runtimeStage !== 'PAUSED'
+      && lead.runtimeStage !== 'LOST',
+  ).length
+  const reconnecting = runtimeError === 'Live updates are reconnecting'
 
   return (
     <div className="flex min-h-svh bg-bg">
@@ -51,22 +56,33 @@ export function AppShell() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setAutopilot(!autopilot)}
-              className="cursor-pointer border-0 bg-transparent p-0"
-              title="Toggle autopilot"
-            >
-              {autopilot ? (
-                <StatusPill tone="live">
-                  <LiveDot />
-                  Autopilot on
-                </StatusPill>
-              ) : (
-                <StatusPill tone="warn">Autopilot paused</StatusPill>
-              )}
-            </button>
-            <StatusPill>{liveWorkers} workers live</StatusPill>
+            {apiConnected && runtimeRun ? (
+              <StatusPill tone={reconnecting || runtimeRun.status === 'FAILED' ? 'warn' : 'neutral'}>
+                Persisted snapshot · {reconnecting
+                  ? 'reconnecting'
+                  : runtimeRun.mode === 'FAKE'
+                    ? 'rehearsal'
+                    : runtimeRun.status.replaceAll('_', ' ').toLowerCase()}
+              </StatusPill>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setAutopilot(!autopilot)}
+                className="cursor-pointer border-0 bg-transparent p-0"
+                title="Toggle the local demo simulation"
+              >
+                {runtimeError ? (
+                  <StatusPill tone="warn">Offline · local preview</StatusPill>
+                ) : autopilot ? (
+                  <StatusPill>Local preview · Autopilot on</StatusPill>
+                ) : (
+                  <StatusPill tone="warn">Local preview · Autopilot paused</StatusPill>
+                )}
+              </button>
+            )}
+            <StatusPill>
+              {activeOpportunities} {apiConnected ? 'active opportunities' : 'preview opportunities'}
+            </StatusPill>
           </div>
         </header>
         <main className="min-w-0 flex-1 overflow-auto bg-canvas p-6">

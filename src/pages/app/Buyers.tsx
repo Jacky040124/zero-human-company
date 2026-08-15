@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { featuredLeadId, statusLabel } from '../../data'
+import { featuredLeadId, leadStatusLabel, statusLabel } from '../../data'
 import type { Lead, LeadStatus } from '../../data'
 import { LeadModal } from '../../components/LeadModal'
 import { LeadProgress } from '../../components/LeadProgress'
@@ -35,7 +35,7 @@ const STATUS_DOT: Record<LeadStatus, string> = {
 type View = 'board' | 'list'
 
 export function Buyers() {
-  const { leads, autopilot } = useDemo()
+  const { leads, autopilot, apiConnected, runtimeError } = useDemo()
   const reduceMotion = Boolean(useReducedMotion())
   const [openId, setOpenId] = useState<string | null>(null)
   const [view, setView] = useState<View>('list')
@@ -66,13 +66,20 @@ export function Buyers() {
   )
 
   const openLead = openId ? (leads.find((lead) => lead.id === openId) ?? null) : null
+  const reconnecting = runtimeError === 'Live updates are reconnecting'
 
   return (
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-ink">Pipeline</h1>
-          <p className="mt-1 text-sm text-muted">watching 12 sources</p>
+          <p className="mt-1 text-sm text-muted">
+            {apiConnected
+              ? 'Persisted run pipeline'
+              : runtimeError
+                ? 'Offline · local preview pipeline'
+                : 'Local preview pipeline'}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex rounded-lg bg-canvas p-0.5">
@@ -81,6 +88,7 @@ export function Buyers() {
                 key={option}
                 type="button"
                 onClick={() => setView(option)}
+                aria-pressed={view === option}
                 className={`cursor-pointer rounded-md border-0 px-2.5 py-1 text-xs capitalize transition-colors ${
                   view === option
                     ? 'bg-bg font-medium text-ink shadow-[0_1px_2px_rgba(15,15,15,0.08)]'
@@ -91,14 +99,23 @@ export function Buyers() {
               </button>
             ))}
           </div>
-          <StatusPill tone={autopilot ? 'live' : 'warn'}>
-            {autopilot ? (
+          <StatusPill tone={reconnecting || Boolean(runtimeError) || (!apiConnected && !autopilot) ? 'warn' : 'live'}>
+            {apiConnected && reconnecting ? (
+              'Persisted snapshot · reconnecting'
+            ) : apiConnected ? (
               <>
                 <LiveDot />
-                Searching
+                Persisted API snapshot
+              </>
+            ) : runtimeError ? (
+              'Offline · local preview'
+            ) : autopilot ? (
+              <>
+                <LiveDot />
+                Local preview · Autopilot on
               </>
             ) : (
-              'Paused'
+              'Local preview · Autopilot paused'
             )}
           </StatusPill>
         </div>
@@ -108,7 +125,7 @@ export function Buyers() {
         <div className="mt-6 divide-y divide-line overflow-hidden rounded-lg border border-black/8 bg-bg">
           <AnimatePresence initial={false}>
             {sorted.map((lead) => {
-              const featured = lead.id === featuredLeadId
+              const featured = !apiConnected && (lead.featured || lead.id === featuredLeadId)
               return (
                 <motion.button
                   key={lead.id}
@@ -143,7 +160,7 @@ export function Buyers() {
                     <LeadProgress lead={lead} interactive={false} showLabels={false} />
                   </span>
                   <span className="w-24 shrink-0 text-right text-xs text-muted">
-                    {statusLabel[lead.status]}
+                    {leadStatusLabel(lead)}
                   </span>
                 </motion.button>
               )
@@ -164,7 +181,7 @@ export function Buyers() {
               <div className="space-y-1.5">
                 <AnimatePresence initial={false}>
                   {cards.map((lead) => {
-                    const featured = lead.id === featuredLeadId
+                    const featured = !apiConnected && (lead.featured || lead.id === featuredLeadId)
                     return (
                       <motion.button
                         key={lead.id}
@@ -191,6 +208,11 @@ export function Buyers() {
                           ) : null}
                         </p>
                         <p className="mt-0.5 truncate text-[0.65rem] text-faint">{lead.city}</p>
+                        {lead.runtimeStage === 'PAUSED' || lead.runtimeStage === 'LOST' ? (
+                          <p className="mt-1 text-[0.62rem] font-medium text-warn">
+                            {leadStatusLabel(lead)}
+                          </p>
+                        ) : null}
                       </motion.button>
                     )
                   })}

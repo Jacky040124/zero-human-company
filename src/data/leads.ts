@@ -1,3 +1,5 @@
+import type { OpportunityStage } from '@zero-human/contracts'
+
 export type LeadStatus = 'sourcing' | 'contacted' | 'negotiating' | 'contract'
 
 export type Lead = {
@@ -14,6 +16,7 @@ export type Lead = {
   lastAction: string
   containers: string
   featured?: boolean
+  runtimeStage?: OpportunityStage
 }
 
 export const featuredLeadId = 'nordlicht'
@@ -427,4 +430,10 @@ export const statusLabel: Record<LeadStatus, string> = {
   contacted: 'Contacted',
   negotiating: 'Negotiating',
   contract: 'Contract',
+}
+
+export function leadStatusLabel(lead: Pick<Lead, 'status' | 'runtimeStage'>): string {
+  if (lead.runtimeStage === 'PAUSED') return 'Paused · policy'
+  if (lead.runtimeStage === 'LOST') return 'Lost / opted out'
+  return statusLabel[lead.status]
 }

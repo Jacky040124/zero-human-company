@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { statusLabel } from '../data'
 import type { Lead, LeadStatus } from '../data'
 import { useDemo } from '../state/DemoContext'
@@ -30,9 +30,11 @@ export function LeadProgress({
   showLabels = true,
 }: LeadProgressProps) {
   const { threads } = useDemo()
+  const reduceMotion = Boolean(useReducedMotion())
   const [hovered, setHovered] = useState(false)
   const currentIndex = STAGES.indexOf(lead.status)
   const recent = (threads[lead.id] ?? []).slice(-2)
+  const stopped = lead.runtimeStage === 'PAUSED' || lead.runtimeStage === 'LOST'
 
   return (
     <div
@@ -66,16 +68,22 @@ export function LeadProgress({
               }`}
             >
               {complete ? <div className={`absolute inset-0 ${stageFill[stage]}`} /> : null}
-              {current ? (
+              {current && stopped ? (
+                <div className="absolute inset-y-0 left-0 w-[60%] bg-warn" />
+              ) : current ? (
                 <motion.div
                   className={`absolute inset-y-0 left-0 w-[60%] overflow-hidden ${stageFill[stage]}`}
-                  animate={{ opacity: [0.72, 1, 0.72] }}
-                  transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                  animate={reduceMotion ? undefined : { opacity: [0.72, 1, 0.72] }}
+                  transition={reduceMotion
+                    ? { duration: 0 }
+                    : { duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
                 >
                   <motion.div
                     className="absolute inset-y-0 w-1/3 bg-white/35"
-                    animate={{ x: ['-120%', '320%'] }}
-                    transition={{ duration: 1.8, repeat: Infinity, ease: 'linear' }}
+                    animate={reduceMotion ? { x: '-120%' } : { x: ['-120%', '320%'] }}
+                    transition={reduceMotion
+                      ? { duration: 0 }
+                      : { duration: 1.8, repeat: Infinity, ease: 'linear' }}
                   />
                 </motion.div>
               ) : null}
@@ -83,6 +91,12 @@ export function LeadProgress({
           )
         })}
       </div>
+
+      {stopped ? (
+        <span className="sr-only">
+          Progress stopped: {lead.runtimeStage === 'PAUSED' ? 'paused' : 'lost'}
+        </span>
+      ) : null}
 
       {showLabels ? (
         <div className="mt-1.5 flex gap-0.5">

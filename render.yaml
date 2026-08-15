@@ -1,0 +1,157 @@
+services:
+  - type: web
+    name: zero-human-company
+    runtime: node
+    region: oregon
+    plan: starter
+    buildCommand: npm ci --include=dev && npm run db:generate && npm run build
+    preDeployCommand: npm run db:migrate
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: zero-human-company-db
+          property: connectionString
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: COOKIE_SECRET
+        generateValue: true
+      - key: OWNER_EMAIL
+        sync: false
+      - key: OWNER_PASSWORD
+        sync: false
+      - key: JUDGE_MODE
+        value: "false"
+      - key: REAL_ACTIONS_ENABLED
+        value: "false"
+      - key: PROVIDER_MODE
+        value: fake
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: OPENROUTER_MODEL
+        value: openai/gpt-5.6-luna
+      - key: STRIPE_MODE
+        value: TEST
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: LINQ_API_KEY
+        sync: false
+      - key: LINQ_API_BASE_URL
+        sync: false
+      - key: LINQ_WEBHOOK_SECRET
+        sync: false
+      - key: LINQ_NORDLICHT_RECIPIENT
+        sync: false
+      - key: LINQ_MAAS_RECIPIENT
+        sync: false
+      - key: TERAC_API_KEY
+        sync: false
+      - key: TERAC_TRANSPORT
+        value: http
+      - key: TERAC_API_BASE_URL
+        sync: false
+      - key: TERAC_STUDY_PATH
+        sync: false
+      - key: TERAC_CONTRACT_REVIEW_PATH
+        sync: false
+      - key: BAND_REST_URL
+        value: https://app.band.ai
+      - key: BAND_WS_URL
+        value: wss://app.band.ai/api/v1/socket/websocket
+      - key: BAND_AGENT_BRAIN
+        value: CODEX
+      - key: BAND_RESEARCHER_AGENT_ID
+        sync: false
+      - key: BAND_RESEARCHER_API_KEY
+        sync: false
+      - key: BAND_NEGOTIATOR_AGENT_ID
+        sync: false
+      - key: BAND_NEGOTIATOR_API_KEY
+        sync: false
+      - key: BAND_POLICY_AGENT_ID
+        sync: false
+      - key: BAND_POLICY_AGENT_API_KEY
+        sync: false
+      - key: DOCUMENSO_API_KEY
+        sync: false
+      - key: DOCUMENSO_API_BASE_URL
+        value: https://app.documenso.com/api/v2
+      - key: DOCUMENSO_TEMPLATE_ID
+        sync: false
+      - key: DOCUMENSO_WEBHOOK_SECRET
+        sync: false
+      - key: DOCUMENSO_OWNER_RECIPIENT_ID
+        sync: false
+      - key: DOCUMENSO_BUYER_RECIPIENT_ID
+        sync: false
+      - key: DOCUMENSO_BUYER_EMAIL
+        sync: false
+      - key: MONID_API_KEY
+        sync: false
+      - key: MONID_API_BASE_URL
+        sync: false
+      - key: RENDER_API_KEY
+        sync: false
+      - key: RENDER_OWNER_ID
+        sync: false
+      - key: RENDER_WORKFLOW_SLUG
+        value: zero-human-company
+
+  # Band supplies the rooms and delivery layer; these three external agents run
+  # on Render. Keep this at one instance so each Band identity owns one socket.
+  - type: worker
+    name: zero-human-company-band-agents
+    runtime: docker
+    region: oregon
+    plan: starter
+    numInstances: 1
+    dockerfilePath: ./apps/api/Dockerfile.band-agents
+    dockerContext: .
+    disk:
+      name: band-codex-state
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BAND_AGENT_BRAIN
+        value: CODEX
+      - key: CODEX_HOME
+        value: /var/data/codex
+      - key: BAND_CODEX_RUNTIME_HOME
+        value: /var/data/codex
+      - key: BAND_CODEX_THREAD_STATE_PATH
+        value: /var/data/band-thread-ids.json
+      - key: BAND_CODEX_WORKING_DIRECTORY
+        value: /tmp/zero-human-company/codex-workdir
+      - key: BAND_REST_URL
+        value: https://app.band.ai
+      - key: BAND_WS_URL
+        value: wss://app.band.ai/api/v1/socket/websocket
+      - key: BAND_RESEARCHER_AGENT_ID
+        sync: false
+      - key: BAND_RESEARCHER_API_KEY
+        sync: false
+      - key: BAND_NEGOTIATOR_AGENT_ID
+        sync: false
+      - key: BAND_NEGOTIATOR_API_KEY
+        sync: false
+      - key: BAND_POLICY_AGENT_ID
+        sync: false
+      - key: BAND_POLICY_AGENT_API_KEY
+        sync: false
+
+databases:
+  - name: zero-human-company-db
+    region: oregon
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+    databaseName: zero_human_company
+    user: zero_human_company

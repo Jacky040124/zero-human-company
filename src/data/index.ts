@@ -6,7 +6,7 @@ export type { OutreachChannel, OutreachChannelId, OutreachMessage, OutreachScene
 export { audienceCandidates, defaultAudienceIds } from './audience'
 export type { AudienceCandidate, AudienceSegment } from './audience'
 export { discoverySources } from './sources'
-export { leads, featuredLeadId, getLead, statusLabel, discoveryLeads } from './leads'
+export { leads, featuredLeadId, getLead, statusLabel, leadStatusLabel, discoveryLeads } from './leads'
 export type { Lead, LeadStatus } from './leads'
 export { nordlichtThread, nordlichtBrief } from './thread'
 export { makeThread, cannedBuyerReply, shortCompany } from './threads'

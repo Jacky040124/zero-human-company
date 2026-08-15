@@ -193,6 +193,10 @@ export function Access() {
     >
       <div className="max-w-2xl">
         <AccessSlider value={accessLevel} onChange={setAccessLevel} />
+        <p className="mt-3 text-xs text-faint">
+          Interface preview only. The connected backend does not persist this preference; live policy
+          gates are enforced by the run configuration.
+        </p>
         <AnimatePresence mode="wait">
           <motion.p
             key={accessLevel}

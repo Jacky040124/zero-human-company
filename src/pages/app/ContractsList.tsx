@@ -1,7 +1,10 @@
 import { Link } from 'react-router-dom'
-import { leads } from '../../data'
+import { leads as seedLeads } from '../../data'
+import { useDemo } from '../../state/DemoContext'
 
 export function ContractsList() {
+  const { leads: runtimeLeads, apiConnected } = useDemo()
+  const leads = apiConnected ? runtimeLeads : seedLeads
   const rows = leads.filter(
     (lead) => lead.status === 'contract' || lead.status === 'negotiating',
   )
@@ -10,8 +13,9 @@ export function ContractsList() {
     <div>
       <h1 className="text-3xl font-semibold tracking-tight text-ink">Contracts</h1>
       <p className="mt-2 text-sm text-muted">
-        Drafts follow the buyer’s country. German law for Hamburg. Dutch law for
-        Rotterdam. Always a Terac lawyer on the redline.
+        {apiConnected
+          ? 'Persisted opportunities at negotiation or contract stage. Contract pages are read-only previews.'
+          : 'Drafts follow the buyer’s country. German law for Hamburg. Dutch law for Rotterdam. Always a Terac lawyer on the redline.'}
       </p>
       <div className="mt-6 overflow-hidden rounded-lg border border-line bg-bg">
         <table className="w-full text-left text-sm">
@@ -28,7 +32,7 @@ export function ContractsList() {
                 <td className="px-4 py-3">
                   <Link
                     to={
-                      lead.id === 'nordlicht'
+                      lead.featured
                         ? `/app/leads/${lead.id}/contract`
                         : `/app/leads/${lead.id}`
                     }
@@ -40,7 +44,7 @@ export function ContractsList() {
                 </td>
                 <td className="px-4 py-3 text-muted">{lead.country}</td>
                 <td className="px-4 py-3 text-muted">
-                  {lead.id === 'nordlicht'
+                  {!apiConnected && lead.id === 'nordlicht'
                     ? 'Terac review returned in 41 min'
                     : lead.lastAction}
                 </td>
