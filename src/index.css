@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif;
+  --font-serif: "Source Serif 4", Georgia, ui-serif, serif;
+
+  /* surfaces: warm paper canvas, white cards */
+  --color-canvas: #f6f5f4;
+  --color-bg: #ffffff;
+  --color-sidebar: #f7f7f5;
+  --color-hover: #efefed;
+  --color-line: #e9e9e7;
+
+  /* text: ink with alpha hierarchy */
+  --color-ink: #191918;
+  --color-muted: #757575;
+  --color-graphite: #615d59;
+  --color-faint: #9b9a97;
+
+  /* the single chromatic commitment */
+  --color-accent: #0075de;
+  --color-accent-soft: #e6f3fe;
+
+  /* rotating accent cast for card backgrounds */
+  --color-marigold: #ffb110;
+  --color-peach: #f6d5b8;
+  --color-coral: #f64932;
+  --color-saffron: #e89d01;
+  --color-vermillion: #e32d14;
+  --color-sky-wash: #62aef0;
+  --color-signal: #097fe8;
+  --color-midnight: #02093a;
+  --color-mocha: #b18164;
+
+  /* status */
+  --color-good: #0f7b6c;
+  --color-good-soft: #ddedea;
+  --color-warn: #d9730d;
+  --color-warn-soft: #faebdd;
+  --color-danger: #e03e3e;
+  --color-danger-soft: #fbe4e4;
+
+  /* pipeline stages */
+  --color-stage-sourcing: #9b9a97;
+  --color-stage-contacted: #e89d01;
+  --color-stage-negotiating: #097fe8;
+  --color-stage-contract: #0f7b6c;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #d3e5ef;
+}
+
+/* Bobby's idle blink — applied to the eye group inside BobbyFace */
+@keyframes bobby-blink {
+  0%,
+  90%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.1);
+  }
+}
+
+.bobby-blink {
+  animation: bobby-blink 3.4s infinite;
+  transform-origin: center;
+}
