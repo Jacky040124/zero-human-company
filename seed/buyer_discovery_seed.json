@@ -1,0 +1,60 @@
+{
+  "_handoff": "Monid pre-run import for the toy-factory demo buyer discovery seed. Companies are REAL (Apollo via Monid) and carry real proof IDs. Contacts are role-player placeholders only — the discovered companies' real people were intentionally NOT pulled; all outbound in the judged run goes to the allowlisted consenting demo role-player, never to these companies.",
+  "monidProof": {
+    "provider": "apollo",
+    "endpoint": "/mixed_companies/search",
+    "monidRunId": "01M03B83EC2T4AH2RJPSXXWKZ9",
+    "queryParams": {
+      "q_organization_keyword_tags[]": ["toys", "wholesale"],
+      "organization_num_employees_ranges[]": ["50,1000"],
+      "organization_locations[]": ["United States"]
+    },
+    "queryTimestamp": "2026-08-15T11:34:00-07:00",
+    "cost": "$0.0500",
+    "totalMatches": 11392,
+    "note": "Store monidRunId on the WorkflowRun/Company proof records; store each company's apolloOrgId as Company.monidProviderId."
+  },
+  "companies": [
+    {
+      "fixtureRole": "strong_fit_verified_contact",
+      "name": "Fat Brain Toys",
+      "domain": "fatbraintoys.com",
+      "apolloOrgId": "54a11c5469702d9d7e60a000",
+      "monidProviderId": "54a11c5469702d9d7e60a000",
+      "contact": { "placeholder": true, "role": "Head of Merchandising", "verified": true, "outboundAddress": "<allowlisted-roleplayer>" }
+    },
+    {
+      "fixtureRole": "strong_company_wrong_first_contact",
+      "name": "Fisher-Price, Inc.",
+      "domain": "fisher-price.com",
+      "apolloOrgId": "5a9cf6cfa6da98d96d7fbdbb",
+      "monidProviderId": "5a9cf6cfa6da98d96d7fbdbb",
+      "contact": { "placeholder": true, "role": "CEO (too senior for this deal)", "verified": false, "outboundAddress": "<allowlisted-roleplayer>" }
+    },
+    {
+      "fixtureRole": "weak_fit",
+      "name": "Lovevery",
+      "domain": "lovevery.com",
+      "apolloOrgId": "5b14bac1a6da9870fa3e3d41",
+      "monidProviderId": "5b14bac1a6da9870fa3e3d41",
+      "contact": { "placeholder": true, "role": "DTC brand — limited wholesale fit", "verified": false, "outboundAddress": "<allowlisted-roleplayer>" }
+    },
+    {
+      "fixtureRole": "duplicate_company_from_another_source",
+      "name": "Melissa & Doug",
+      "domain": "melissaanddoug.com",
+      "apolloOrgId": "5ed201a8fa6e130001e4f4c7",
+      "monidProviderId": "5ed201a8fa6e130001e4f4c7",
+      "duplicateOf": "melissaanddoug.com",
+      "contact": { "placeholder": true, "role": "Buyer", "verified": true, "outboundAddress": "<allowlisted-roleplayer>" }
+    },
+    {
+      "fixtureRole": "qualified_no_contact_above_threshold",
+      "name": "Playmates Toys Inc.",
+      "domain": "playmatestoys.com",
+      "apolloOrgId": "54a12aed69702db6488d4702",
+      "monidProviderId": "54a12aed69702db6488d4702",
+      "contact": { "placeholder": true, "role": "none above threshold", "verified": false, "outboundAddress": null }
+    }
+  ]
+}
