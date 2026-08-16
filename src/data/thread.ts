@@ -4,6 +4,10 @@ export type ThreadMessage = {
   role: 'quay' | 'buyer'
   time: string
   body: string
+  subject?: string
+  toName?: string
+  toEmail?: string
+  source?: 'llm' | 'template'
 }
 
 export const nordlichtThread: ThreadMessage[] = [

@@ -3,8 +3,30 @@ import { Link } from 'react-router-dom'
 import { motion, useReducedMotion } from 'framer-motion'
 import { leadStatusLabel } from '../data'
 import type { Lead, LeadStatus } from '../data'
+import type { ThreadMessage } from '../data/thread'
 import { useDemo } from '../state/DemoContext'
 import { LeadProgress } from './LeadProgress'
+
+type ChannelId = 'email' | 'whatsapp' | 'linkedin' | 'wechat'
+
+const CHANNELS: Array<{ id: ChannelId; label: string; available: boolean }> = [
+  { id: 'email', label: 'Email', available: true },
+  { id: 'whatsapp', label: 'WhatsApp', available: false },
+  { id: 'linkedin', label: 'LinkedIn', available: false },
+  { id: 'wechat', label: 'WeChat', available: false },
+]
+
+function buyerEmail(lead: Lead): string {
+  if (lead.company.includes('Nordlicht')) return 'anja@nordlicht.de'
+  const first = (lead.buyer.split(' ')[0] ?? 'buyer').toLowerCase().replace(/[^a-z]/g, '') || 'buyer'
+  const host = lead.company.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 14) || 'buyer'
+  return `${first}@${host}.com`
+}
+
+function emailSubject(lead: Lead): string {
+  if (lead.company.includes('Nordlicht')) return 'FSC sofas from Foshan — 35-day lead'
+  return `${lead.focus} from Hengxin Home`
+}
 
 const overlayShadow =
   'shadow-[rgba(15,15,15,0.05)_0_0_0_1px,rgba(15,15,15,0.1)_0_3px_6px,rgba(15,15,15,0.2)_0_9px_24px]'
@@ -40,6 +62,54 @@ function TypingDots() {
   )
 }
 
+function EmailLetter({
+  message,
+  lead,
+  subject,
+}: {
+  message: ThreadMessage
+  lead: Lead
+  subject: string
+}) {
+  const mine = message.role !== 'buyer'
+  const peerName = message.toName ?? (lead.buyer === 'Research only' ? 'Procurement' : lead.buyer)
+  const peerEmail = message.toEmail ?? buyerEmail(lead)
+  const fromName = mine ? 'Lead Factory' : peerName
+  const fromAddr = mine ? 'outbound@leadfactory.run' : peerEmail
+  const toLine = mine
+    ? `${peerName} <${peerEmail}>`
+    : 'Lead Factory <outbound@leadfactory.run>'
+  const initials = fromName.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]).join('')
+
+  return (
+    <article className="rounded-lg border border-black/8 bg-bg">
+      <div className="flex items-start gap-2.5 border-b border-line px-3.5 py-2.5">
+        <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[0.65rem] font-semibold ${
+          mine ? 'bg-mocha text-bg' : 'bg-sky-wash text-white'
+        }`}>
+          {initials}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="truncate text-sm text-ink">
+              <span className="font-semibold">{fromName}</span>{' '}
+              <span className="text-faint">&lt;{fromAddr}&gt;</span>
+            </p>
+            <time className="shrink-0 text-[0.62rem] text-faint">{message.time}</time>
+          </div>
+          <p className="truncate text-[0.68rem] text-muted">to {toLine}</p>
+          <p className="mt-0.5 truncate text-[0.68rem] text-faint">Subject: {subject}</p>
+        </div>
+      </div>
+      <div className="px-3.5 py-3">
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">
+          {message.body.replace(/\[(?:your\s+)?name\]/gi, '').replace(/\n(?:best regards|kind regards|sincerely),?\s*$/i, '').trim()}
+        </p>
+      </div>
+    </article>
+  )
+}
+
 export function LeadModal({ lead, onClose }: LeadModalProps) {
   const {
     threads,
@@ -47,12 +117,16 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
     setLeadAutonomy,
     sendLeadMessage,
     leadTyping,
-    apiConnected,
+    ensureLeadEmail,
   } = useDemo()
   const messages = threads[lead.id] ?? []
   const autonomous = leadAutonomy[lead.id] ?? true
   const typing = Boolean(leadTyping[lead.id])
   const [draft, setDraft] = useState('')
+  const [channel, setChannel] = useState<ChannelId>('email')
+  const [drafting, setDrafting] = useState(false)
+  const first = messages[0]
+  const subject = first?.subject ?? emailSubject(lead)
   const overlayRef = useRef<HTMLDivElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
@@ -160,6 +234,17 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
     setDraft('')
   }, [lead.id])
 
+  useEffect(() => {
+    let cancelled = false
+    setDrafting(true)
+    void ensureLeadEmail(lead).finally(() => {
+      if (!cancelled) setDrafting(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [ensureLeadEmail, lead.id])
+
   const handleSend = () => {
     const trimmed = draft.trim()
     if (!trimmed) return
@@ -179,7 +264,7 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
         aria-modal="true"
         aria-labelledby="lead-modal-title"
         tabIndex={-1}
-        className={`flex max-h-[85vh] w-full max-w-2xl flex-col rounded-lg bg-bg ${overlayShadow}`}
+        className={`flex max-h-[85vh] w-full max-w-3xl flex-col rounded-lg bg-bg ${overlayShadow}`}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="shrink-0 border-b border-line px-5 py-4">
@@ -189,7 +274,8 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
                 {lead.company}
               </h2>
               <p className="mt-0.5 text-sm text-muted">
-                {lead.buyer}, {lead.title}
+                {first?.toName ?? (lead.buyer === 'Research only' ? 'Drafting contact…' : lead.buyer)}
+                {lead.title === 'Research candidate' ? '' : `, ${lead.title}`}
               </p>
               <p className="mt-0.5 text-xs text-faint">
                 {lead.city}, {lead.country}
@@ -227,67 +313,60 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
           <div className="mt-4">
             <LeadProgress lead={lead} interactive={false} showLabels={false} />
           </div>
+          <div className="mt-4 flex flex-wrap gap-1.5" role="tablist" aria-label="Channels">
+            {CHANNELS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={channel === item.id}
+                disabled={!item.available}
+                onClick={() => {
+                  if (item.available) setChannel(item.id)
+                }}
+                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                  channel === item.id
+                    ? 'border-ink bg-ink text-white'
+                    : item.available
+                      ? 'cursor-pointer border-black/10 bg-bg text-ink/70 hover:bg-hover'
+                      : 'cursor-not-allowed border-black/8 bg-hover text-faint'
+                }`}
+              >
+                {item.label}
+                {item.available ? null : ' · soon'}
+              </button>
+            ))}
+          </div>
         </header>
 
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-canvas px-5 py-4">
-          {apiConnected ? (
-            <div className="rounded-lg border border-line bg-bg px-4 py-3">
-              <p className="text-[0.65rem] font-medium uppercase tracking-widest text-muted">
-                Latest persisted run summary
-              </p>
-              <p className="mt-2 text-sm leading-relaxed text-ink">{lead.lastAction}</p>
-              <p className="mt-2 text-xs text-muted">
-                Individual buyer messages are not exposed by the current API.
-              </p>
-            </div>
-          ) : (
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="truncate text-sm font-medium text-ink">{subject}</p>
+            <span className="shrink-0 rounded-sm bg-hover px-1.5 py-0.5 text-[0.55rem] font-medium text-muted">
+              Inbox
+            </span>
+          </div>
           <div className="space-y-3">
-            {messages.map((message) => {
-              const mine = message.role !== 'buyer'
-              return (
-                <div
-                  key={message.id}
-                  className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}
-                >
-                  <p
-                    className={`mb-1 px-1 text-[0.62rem] text-faint ${
-                      mine ? 'text-right' : ''
-                    }`}
-                  >
-                    {message.from} · {message.time}
-                  </p>
-                  <div
-                    className={`max-w-[82%] px-3 py-2 ${
-                      mine
-                        ? 'rounded-xl rounded-br-sm bg-accent-soft'
-                        : 'rounded-xl rounded-bl-sm border border-black/6 bg-bg'
-                    }`}
-                  >
-                    <p className="text-sm leading-relaxed text-ink">{message.body}</p>
-                  </div>
-                </div>
-              )
-            })}
+            {drafting && messages.length === 0 ? (
+              <article className="rounded-lg border border-black/8 bg-bg px-3.5 py-3">
+                <p className="text-sm text-ink">Drafting the first email…</p>
+                <p className="mt-1 text-xs text-muted">gpt-4o-mini is writing a first touch for {lead.company}.</p>
+                <TypingDots />
+              </article>
+            ) : null}
+            {messages.map((message) => (
+              <EmailLetter key={message.id} message={message} lead={lead} subject={message.subject ?? subject} />
+            ))}
             {typing ? (
-              <div className="flex flex-col items-start">
-                <p className="mb-1 px-1 text-[0.62rem] text-faint">{lead.buyer}</p>
-                <div className="rounded-xl rounded-bl-sm border border-black/6 bg-bg px-3 py-2">
-                  <TypingDots />
-                </div>
-              </div>
+              <article className="rounded-lg border border-black/8 bg-bg px-3.5 py-3">
+                <p className="text-[0.68rem] text-muted">{lead.buyer} is writing a reply…</p>
+                <TypingDots />
+              </article>
             ) : null}
           </div>
-          )}
         </div>
 
         <footer className="shrink-0 border-t border-line px-5 py-3">
-          {apiConnected ? (
-            <p className="text-xs text-muted">
-              Read-only persisted opportunity record. Messaging and per-buyer autonomy controls are unavailable in
-              the current backend contract.
-            </p>
-          ) : (
-          <>
           <div className="flex items-center justify-between gap-3">
             <label className="flex cursor-pointer items-center gap-2 text-sm text-ink">
               <span>Autopilot</span>
@@ -308,36 +387,44 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
               </button>
             </label>
             {autonomous ? (
-              <p className="text-xs text-muted">{lead.worker} is handling this conversation.</p>
-            ) : null}
+              <p className="text-xs text-muted">{lead.worker} is handling this inbox.</p>
+            ) : (
+              <p className="text-xs text-muted">Reply as email to {buyerEmail(lead)}</p>
+            )}
           </div>
 
           {!autonomous ? (
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                aria-label={`Message to ${lead.buyer}`}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault()
-                    handleSend()
-                  }
-                }}
-                placeholder="Write as the factory…"
-                className="min-w-0 flex-1 rounded-md border border-line bg-bg px-3 py-1.5 text-sm text-ink outline-none placeholder:text-faint focus:border-accent"
-              />
-              <button
-                type="button"
-                onClick={handleSend}
-                className="cursor-pointer rounded-md border-0 bg-accent px-3.5 py-1.5 text-sm font-medium text-white hover:bg-accent/90"
-              >
-                Send
-              </button>
+            <div className="mt-3 rounded-lg border border-line bg-sidebar px-3 py-2.5">
+              <p className="text-[0.68rem] text-muted">
+                <span className="font-medium text-ink">Reply</span>
+                {' · '}
+                Re: {subject}
+              </p>
+              <div className="mt-2 flex items-end gap-2">
+                <textarea
+                  aria-label={`Email to ${lead.buyer}`}
+                  value={draft}
+                  rows={3}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                      event.preventDefault()
+                      handleSend()
+                    }
+                  }}
+                  placeholder="Write the next email…"
+                  className="min-h-[4.5rem] min-w-0 flex-1 resize-none rounded-md border border-line bg-bg px-3 py-2 text-sm text-ink outline-none placeholder:text-faint focus:border-accent"
+                />
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  className="cursor-pointer rounded-md border-0 bg-accent px-3.5 py-1.5 text-sm font-medium text-white hover:bg-accent/90"
+                >
+                  Send
+                </button>
+              </div>
             </div>
           ) : null}
-          </>
-          )}
         </footer>
       </div>
     </div>

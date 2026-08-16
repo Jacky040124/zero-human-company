@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { catalog } from '../../data'
-import type { Product } from '../../data'
 import type { BobbyExpression } from '../../components/Bobby'
 import { OnboardingLayout } from './OnboardingLayout'
 
@@ -15,92 +13,25 @@ type CatalogFile = {
 type CatalogItem = {
   id: string
   name: string
-  nameZh: string
-  category: string
-  priceLabel: string
-  image: string
+  sku: string | null
+  notes: string
   flagged: boolean
+  confidence: number
 }
 
 const SAMPLE_FILE: CatalogFile = {
-  name: 'hengxin-catalog-2026.pdf',
-  sizeLabel: '2.4 MB',
+  name: 'Sample catalog',
+  sizeLabel: 'text',
 }
 
-const EXTRACT_DURATION_MS = 7800
+const MOCK_ITEMS: CatalogItem[] = [
+  { id: 'hx-sf-04', name: 'Lingnan Sofa', sku: 'HX-SF-04', notes: 'oak frame, linen · matte oil · removable covers, FSC Mix', flagged: false, confidence: 0.92 },
+  { id: 'hx-ch-12', name: 'Canton Lounge Chair', sku: 'HX-CH-12', notes: 'walnut, leather · satin lacquer · kiln-dried frame', flagged: false, confidence: 0.9 },
+  { id: 'hx-tb-08', name: 'Pearl River Dining Table', sku: 'HX-TB-08', notes: 'solid ash · natural oil · M8 table bolts', flagged: false, confidence: 0.88 },
+  { id: 'hx-hd-21', name: 'Crossbar Handle', sku: 'HX-HD-21', notes: '304 stainless · brushed nickel · M4 x 25 mm', flagged: true, confidence: 0.46 },
+]
 
-/* Variants per base product — sums to 214, the "hundreds of SKUs" a real
-   factory catalog carries. Derived from the 6 seed products so the demo
-   needs no extra data. */
-const VARIANTS_PER_BASE = [38, 42, 31, 24, 46, 33]
-
-function baseNameParts(name: string): string {
-  return name.replace(/\s*\d+$/, '')
-}
-
-function buildFullCatalog(): CatalogItem[] {
-  const items: CatalogItem[] = []
-  catalog.forEach((base: Product, baseIndex: number) => {
-    const count = VARIANTS_PER_BASE[baseIndex] ?? 20
-    const stem = baseNameParts(base.name)
-    const stemZh = baseNameParts(base.nameZh)
-    for (let i = 0; i < count; i += 1) {
-      const num = String(i + 1).padStart(2, '0')
-      const price = Math.round(base.list * (0.85 + ((i * 7) % 10) * 0.06))
-      items.push({
-        id: `${base.id}-v${num}`,
-        name: `${stem} ${num}`,
-        nameZh: `${stemZh} ${num}`,
-        category: base.category,
-        priceLabel: `€${price} / ${base.unit}`,
-        image: base.image,
-        flagged: false,
-      })
-    }
-  })
-  // Interleave categories so extraction feels like reading a real PDF,
-  // then flag ~1 in 17 for review.
-  const shuffled: CatalogItem[] = []
-  const buckets = catalog.map((base) =>
-    items.filter((item) => item.id.startsWith(base.id)),
-  )
-  let remaining = items.length
-  let cursor = 0
-  while (remaining > 0) {
-    const bucket = buckets[cursor % buckets.length]
-    const next = bucket.shift()
-    if (next) {
-      shuffled.push(next)
-      remaining -= 1
-    }
-    cursor += 1
-  }
-  return shuffled.map((item, index) =>
-    index % 17 === 5 ? { ...item, flagged: true } : item,
-  )
-}
-
-const FULL_CATALOG = buildFullCatalog()
-const TOTAL = FULL_CATALOG.length
-const CATEGORIES = [...new Set(FULL_CATALOG.map((item) => item.category))]
-const FLAGGED_COUNT = FULL_CATALOG.filter((item) => item.flagged).length
 const INITIAL_VISIBLE = 48
-
-/* The counter rushes through all 214, but only a sampled handful get the
-   full "pop out of the scan → compress into the list" performance.
-   Step 23 is coprime with the 6-category interleave, so heroes rotate
-   across categories (and therefore across product images). */
-const HERO_COUNT = 9
-const HERO_ITEMS = Array.from(
-  { length: HERO_COUNT },
-  (_, i) => FULL_CATALOG[(i * 23 + 5) % TOTAL],
-)
-const HERO_FIRST_DELAY_MS = 500
-const HERO_INTERVAL_MS = 760
-const HERO_HOLD_MS = 500
-
-type HeroStage = 'flying' | 'listed'
-type HeroState = { item: CatalogItem; stage: HeroStage }
 
 const PDF_BLOCKS: Array<{ kind: 'lines' | 'image'; color?: string }> = [
   { kind: 'lines' },
@@ -122,8 +53,15 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function easeOutCubic(t: number) {
-  return 1 - Math.pow(1 - t, 3)
+function isPdfFile(file: File) {
+  if (file.type === 'application/pdf') return true
+  return file.name.toLowerCase().endsWith('.pdf')
+}
+
+function confidenceTone(confidence: number): 'high' | 'mid' | 'low' {
+  if (confidence >= 0.75) return 'high'
+  if (confidence >= 0.5) return 'mid'
+  return 'low'
 }
 
 function FurniturePlaceholder() {
@@ -133,29 +71,6 @@ function FurniturePlaceholder() {
       <path d="M28 48v-8a8 8 0 0 1 8-8h88a8 8 0 0 1 8 8v8" fill="none" stroke="currentColor" strokeWidth="1.5" />
       <path d="M30 84v12M130 84v12M18 70h124" fill="none" stroke="currentColor" strokeWidth="1.5" />
     </svg>
-  )
-}
-
-function ProductThumb({ src, alt }: { src: string; alt: string }) {
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-
-  return (
-    <div className="relative aspect-[4/3] overflow-hidden bg-sidebar">
-      {status === 'error' ? (
-        <FurniturePlaceholder />
-      ) : (
-        <img
-          src={src}
-          alt={alt}
-          loading="lazy"
-          className={`h-full w-full object-cover transition-opacity duration-300 ${
-            status === 'ready' ? 'opacity-100' : 'opacity-0'
-          }`}
-          onLoad={() => setStatus('ready')}
-          onError={() => setStatus('error')}
-        />
-      )}
-    </div>
   )
 }
 
@@ -207,9 +122,6 @@ function PdfPage({ file }: { file: CatalogFile }) {
   )
 }
 
-/* Card that pops out of the scan line on the PDF. It shares a layoutId with
-   its future list row, so when the hero flips to 'listed' Framer Motion
-   FLIP-morphs this card across the screen and compresses it into the row. */
 function FlyingCard({ item }: { item: CatalogItem }) {
   return (
     <motion.div
@@ -220,11 +132,11 @@ function FlyingCard({ item }: { item: CatalogItem }) {
       className="absolute top-[30%] left-[52%] z-10 w-40 overflow-hidden rounded-lg border border-black/8 bg-bg shadow-[0_10px_28px_rgba(15,15,15,0.22)]"
     >
       <motion.div layout className="aspect-[4/3] overflow-hidden bg-sidebar">
-        <img src={item.image} alt="" className="h-full w-full object-cover" />
+        <FurniturePlaceholder />
       </motion.div>
       <motion.div layout="position" className="p-2">
         <p className="truncate text-xs font-medium text-ink">{item.name}</p>
-        <p className="truncate text-[0.68rem] text-muted">{item.priceLabel}</p>
+        <p className="truncate text-[0.68rem] text-muted">{item.sku ?? 'Reading…'}</p>
       </motion.div>
     </motion.div>
   )
@@ -250,49 +162,44 @@ function ExtractedRow({
         layout={animateLayout}
         className="h-8 w-8 shrink-0 overflow-hidden rounded bg-hover"
       >
-        <img src={item.image} alt="" className="h-full w-full object-cover" />
+        <FurniturePlaceholder />
       </motion.div>
       <motion.p
         layout={animateLayout ? 'position' : undefined}
         className="min-w-0 flex-1 truncate text-xs text-ink"
       >
-        {item.name} <span className="text-faint">{item.nameZh}</span>
+        {item.name}
       </motion.p>
-      <motion.span
-        layout={animateLayout ? 'position' : undefined}
-        className="shrink-0 text-[0.68rem] text-muted"
-      >
-        {item.priceLabel}
-      </motion.span>
     </motion.div>
   )
 }
 
 function ExtractionPanel({
-  count,
   rows,
   animateLayout,
+  chunkIndex,
+  chunkCount,
 }: {
-  count: number
   rows: CatalogItem[]
   animateLayout: boolean
+  chunkIndex: number
+  chunkCount: number
 }) {
-  const progress = Math.min(1, count / TOTAL)
-
+  const progress = chunkCount > 0 ? Math.min(1, chunkIndex / chunkCount) : 0
   return (
     <div className="min-w-0 flex-1 rounded-xl border border-black/8 bg-bg p-6 shadow-[0_4px_12px_rgba(15,15,15,0.08)]">
-      <div className="flex items-baseline gap-3">
-        <p className="font-mono text-5xl font-semibold tabular-nums tracking-tight text-ink">
-          {count}
-        </p>
-        <p className="text-sm text-muted">of {TOTAL} products extracted</p>
-      </div>
+      <p className="text-lg font-semibold tracking-tight text-ink">Reading the catalog…</p>
+      <p className="mt-1 text-sm text-muted">
+        {chunkCount > 0
+          ? `Page ${Math.min(chunkIndex + 1, chunkCount)} of ${chunkCount} · ${rows.length} names so far`
+          : 'Extracting SKUs from the catalog'}
+      </p>
 
       <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-black/8">
         <motion.div
           className="h-full rounded-full bg-accent"
-          animate={{ width: `${progress * 100}%` }}
-          transition={{ duration: 0.2, ease: 'linear' }}
+          animate={{ width: `${Math.max(progress * 100, chunkCount === 0 ? 18 : 0)}%` }}
+          transition={{ duration: 0.25, ease: 'easeOut' }}
         />
       </div>
 
@@ -304,36 +211,54 @@ function ExtractionPanel({
           <ExtractedRow key={item.id} item={item} animateLayout={animateLayout} />
         ))}
       </div>
-
-      <p className="mt-5 text-[0.68rem] italic text-faint">
-        click anywhere to skip the show
-      </p>
     </div>
   )
 }
 
-type Filter = 'All' | 'Flagged' | (string & {})
+type Filter = 'All' | 'Flagged'
 
-function CatalogBrowser() {
+function cardToneClass(item: CatalogItem) {
+  const tone = confidenceTone(item.confidence)
+  if (tone === 'low') {
+    return {
+      article: 'border-warn/40 bg-warn-soft/40',
+      name: 'text-warn',
+      meta: 'text-warn/80',
+    }
+  }
+  if (tone === 'mid') {
+    return {
+      article: 'border-warn/20 bg-bg',
+      name: 'text-muted',
+      meta: 'text-faint',
+    }
+  }
+  return {
+    article: 'border-black/8 bg-bg',
+    name: 'text-ink',
+    meta: 'text-faint',
+  }
+}
+
+function CatalogBrowser({ items }: { items: CatalogItem[] }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('All')
   const [showAll, setShowAll] = useState(false)
 
+  const flaggedCount = items.filter((item) => item.flagged).length
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return FULL_CATALOG.filter((item) => {
+    return items.filter((item) => {
       if (filter === 'Flagged' && !item.flagged) return false
-      if (filter !== 'All' && filter !== 'Flagged' && item.category !== filter) {
-        return false
-      }
       if (!q) return true
       return (
-        item.name.toLowerCase().includes(q) ||
-        item.nameZh.includes(q) ||
-        item.category.toLowerCase().includes(q)
+        item.name.toLowerCase().includes(q)
+        || (item.sku?.toLowerCase().includes(q) ?? false)
+        || item.notes.toLowerCase().includes(q)
       )
     })
-  }, [query, filter])
+  }, [items, query, filter])
 
   const visible = showAll ? filtered : filtered.slice(0, INITIAL_VISIBLE)
 
@@ -341,11 +266,10 @@ function CatalogBrowser() {
     <div>
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-black/8 bg-bg px-5 py-4">
         <p className="text-sm text-ink">
-          <span className="font-semibold">{TOTAL} products</span>
-          <span className="text-muted"> · {CATEGORIES.length} categories</span>
+          <span className="font-semibold">{items.length} products</span>
         </p>
         <p className="text-sm text-warn">
-          ⚠ {FLAGGED_COUNT} flagged for review
+          ⚠ {flaggedCount} flagged for review
         </p>
         <p className="ml-auto text-xs text-muted">
           Bobby read every page so you don't have to
@@ -357,10 +281,10 @@ function CatalogBrowser() {
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder={`Search ${TOTAL} products…`}
+          placeholder={`Search ${items.length} products…`}
           className="w-56 rounded-lg border border-black/10 bg-bg px-3 py-1.5 text-sm text-ink placeholder:text-faint focus:border-accent focus:outline-none"
         />
-        {(['All', ...CATEGORIES, 'Flagged'] as Filter[]).map((option) => (
+        {(['All', 'Flagged'] as Filter[]).map((option) => (
           <button
             key={option}
             type="button"
@@ -376,37 +300,49 @@ function CatalogBrowser() {
                   : 'border-black/10 bg-bg text-ink/70 hover:bg-hover'
             }`}
           >
-            {option === 'Flagged' ? `⚠ Flagged (${FLAGGED_COUNT})` : option}
+            {option === 'Flagged' ? `⚠ Flagged (${flaggedCount})` : option}
           </button>
         ))}
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-        {visible.map((item) => (
-          <article
-            key={item.id}
-            className="overflow-hidden rounded-lg border border-black/8 bg-bg transition-shadow hover:shadow-[0_4px_12px_rgba(15,15,15,0.08)]"
-          >
-            <ProductThumb src={item.image} alt={item.name} />
-            <div className="p-2.5">
-              <p className="truncate text-xs font-medium text-ink">{item.name}</p>
-              <p className="truncate text-[0.68rem] text-faint">{item.nameZh}</p>
-              <div className="mt-1.5 flex items-center justify-between gap-2">
-                <p className="text-xs text-ink/80">{item.priceLabel}</p>
-                {item.flagged && (
-                  <span className="shrink-0 rounded bg-warn-soft px-1 py-0.5 text-[0.6rem] font-medium text-warn">
-                    ⚠ review
-                  </span>
-                )}
+        {visible.map((item) => {
+          const tone = cardToneClass(item)
+          return (
+            <article
+              key={item.id}
+              className={`overflow-hidden rounded-lg border transition-shadow hover:shadow-[0_4px_12px_rgba(15,15,15,0.08)] ${tone.article}`}
+            >
+              <div className="relative aspect-[4/3] overflow-hidden bg-sidebar">
+                <FurniturePlaceholder />
               </div>
-            </div>
-          </article>
-        ))}
+              <div className="p-2.5">
+                <p className={`truncate text-xs font-medium ${tone.name}`}>{item.name}</p>
+                <p className={`truncate text-[0.68rem] ${tone.meta}`}>{item.sku ?? '—'}</p>
+                {item.notes && (
+                  <p className={`mt-1 line-clamp-2 text-[0.68rem] ${tone.meta}`}>{item.notes}</p>
+                )}
+                <div className="mt-1.5 flex items-center justify-between gap-2">
+                  <p className={`text-[0.6rem] tabular-nums ${tone.meta}`}>
+                    {Math.round(item.confidence * 100)}%
+                  </p>
+                  {item.flagged && (
+                    <span className="shrink-0 rounded bg-warn-soft px-1 py-0.5 text-[0.6rem] font-medium text-warn">
+                      ⚠ review
+                    </span>
+                  )}
+                </div>
+              </div>
+            </article>
+          )
+        })}
       </div>
 
       {filtered.length === 0 && (
         <p className="py-12 text-center text-sm text-muted">
-          Nothing matches — try another name or category.
+          {items.length === 0
+            ? 'No products came back from this catalog.'
+            : 'Nothing matches — try another name or SKU.'}
         </p>
       )}
 
@@ -425,108 +361,70 @@ function CatalogBrowser() {
   )
 }
 
-function extractionVoice(count: number): { expression: BobbyExpression; line: string } {
-  if (count < TOTAL * 0.2) {
-    return { expression: 'reading', line: 'Page 12… the oak tables look strong 👀' }
-  }
-  if (count < TOTAL * 0.8) {
-    return { expression: 'excited', line: `${count} down, still reading… 🔍` }
-  }
-  return { expression: 'excited', line: 'Almost through the appendix…' }
-}
-
 export function Catalog() {
   const [phase, setPhase] = useState<Phase>('upload')
   const [file, setFile] = useState<CatalogFile | null>(null)
+  const [items, setItems] = useState<CatalogItem[]>([])
+  const [error, setError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
-  const [extractedCount, setExtractedCount] = useState(0)
-  const [heroes, setHeroes] = useState<HeroState[]>([])
+  const [heroes, setHeroes] = useState<CatalogItem[]>([])
+  const [chunkIndex, setChunkIndex] = useState(0)
+  const [chunkCount, setChunkCount] = useState(0)
   const reduceMotion = Boolean(useReducedMotion())
   const inputRef = useRef<HTMLInputElement>(null)
-  const rafRef = useRef<number>(0)
 
-  const finishDone = () => {
-    cancelAnimationFrame(rafRef.current)
-    setExtractedCount(TOTAL)
-    setPhase('done')
-  }
-
-  const startWithFile = (next: CatalogFile) => {
-    setFile(next)
-    setExtractedCount(0)
+  useEffect(() => {
+    if (phase !== 'extracting' || !file) return
+    let alive = true
+    setItems([])
     setHeroes([])
+    setChunkIndex(0)
+    setChunkCount(MOCK_ITEMS.length)
+
+    const timers = MOCK_ITEMS.map((item, index) =>
+      window.setTimeout(() => {
+        if (!alive) return
+        setChunkIndex(index + 1)
+        setHeroes((prev) => [item, ...prev].slice(0, 12))
+        if (index === MOCK_ITEMS.length - 1) {
+          setItems(MOCK_ITEMS)
+          setPhase('done')
+        }
+      }, 160 * (index + 1)),
+    )
+
+    return () => {
+      alive = false
+      timers.forEach((id) => window.clearTimeout(id))
+    }
+  }, [phase, file])
+
+  const runExtract = (nextFile: CatalogFile) => {
+    setError(null)
+    setFile(nextFile)
     setPhase('extracting')
   }
 
   const onFiles = (list: FileList | null) => {
     const picked = list?.[0]
     if (!picked) return
-    startWithFile({ name: picked.name, sizeLabel: formatSize(picked.size) })
+    if (!isPdfFile(picked)) {
+      setError('Please drop a PDF catalog.')
+      return
+    }
+    runExtract({ name: picked.name, sizeLabel: formatSize(picked.size) })
   }
 
-  useEffect(() => {
-    if (phase !== 'extracting') return
-    const start = performance.now()
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / EXTRACT_DURATION_MS)
-      setExtractedCount(Math.round(easeOutCubic(t) * TOTAL))
-      if (t >= 1) {
-        setPhase('done')
-        return
-      }
-      rafRef.current = requestAnimationFrame(tick)
-    }
-    rafRef.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [phase])
-
-  // Hero timeline: each sampled item spawns as a flying card over the scan,
-  // holds long enough to register, then flips to 'listed' — the layoutId
-  // morph compresses it into a row at the top of the extracted list.
-  useEffect(() => {
-    if (phase !== 'extracting') return
-    const timers: number[] = []
-    HERO_ITEMS.forEach((item, index) => {
-      timers.push(
-        window.setTimeout(() => {
-          if (reduceMotion) {
-            setHeroes((prev) => [...prev, { item, stage: 'listed' }])
-            return
-          }
-          setHeroes((prev) => [...prev, { item, stage: 'flying' }])
-          timers.push(
-            window.setTimeout(() => {
-              setHeroes((prev) =>
-                prev.map((hero) =>
-                  hero.item.id === item.id ? { ...hero, stage: 'listed' } : hero,
-                ),
-              )
-            }, HERO_HOLD_MS),
-          )
-        }, HERO_FIRST_DELAY_MS + index * HERO_INTERVAL_MS),
-      )
-    })
-    return () => timers.forEach((timer) => window.clearTimeout(timer))
-  }, [phase, reduceMotion])
-
-  // Preload hero product images so no card flies with an empty thumbnail.
-  useEffect(() => {
-    if (phase !== 'extracting') return
-    HERO_ITEMS.forEach((item) => {
-      const img = new Image()
-      img.src = item.image
-    })
-  }, [phase])
-
+  const flaggedCount = items.filter((item) => item.flagged).length
   const voice =
     phase === 'upload'
       ? { expression: 'reading' as const, line: "Drop me the catalog. I'll do the reading." }
       : phase === 'done'
         ? {
             expression: 'proud' as const,
-            line: `Read all ${TOTAL}. Flagged ${FLAGGED_COUNT} for you 😌`,
+            line: `Read ${items.length}. Flagged ${flaggedCount} for you 😌`,
           }
-        : extractionVoice(extractedCount)
+        : { expression: 'reading' as BobbyExpression, line: 'Reading the catalog…' }
 
   return (
     <OnboardingLayout
@@ -573,15 +471,20 @@ export function Catalog() {
               }`}
             >
               <p className="text-sm font-medium text-ink">Drop the Hengxin catalog</p>
-              <p className="mt-1 text-xs text-muted">PDF only. I just need the filename.</p>
+              <p className="mt-1 text-xs text-muted">
+                PDF. I will extract every SKU from the pages.
+              </p>
             </button>
             <button
               type="button"
-              onClick={() => startWithFile(SAMPLE_FILE)}
+              onClick={() => void runExtract(SAMPLE_FILE)}
               className="mt-4 cursor-pointer border-0 bg-transparent p-0 text-xs text-muted hover:text-ink"
             >
-              Use sample: hengxin-catalog-2026.pdf (2.4 MB)
+              Use sample catalog text
             </button>
+            {error && (
+              <p className="mt-3 text-sm text-warn">{error}</p>
+            )}
           </motion.div>
         )}
 
@@ -592,7 +495,6 @@ export function Catalog() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="flex flex-col items-start gap-5 md:flex-row"
-            onClick={finishDone}
           >
             <motion.div
               initial={{ opacity: 0, y: 16, scale: 0.96 }}
@@ -601,19 +503,13 @@ export function Catalog() {
               className="relative hidden shrink-0 md:block"
             >
               <PdfPage file={file} />
-              {heroes
-                .filter((hero) => hero.stage === 'flying')
-                .map((hero) => (
-                  <FlyingCard key={hero.item.id} item={hero.item} />
-                ))}
+              {!reduceMotion && heroes[0] && <FlyingCard item={heroes[0]} />}
             </motion.div>
             <ExtractionPanel
-              count={extractedCount}
-              rows={heroes
-                .filter((hero) => hero.stage === 'listed')
-                .map((hero) => hero.item)
-                .reverse()}
+              rows={heroes}
               animateLayout={!reduceMotion}
+              chunkIndex={chunkIndex}
+              chunkCount={chunkCount}
             />
           </motion.div>
         )}
@@ -625,7 +521,7 @@ export function Catalog() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
           >
-            <CatalogBrowser />
+            <CatalogBrowser items={items} />
           </motion.div>
         )}
       </AnimatePresence>

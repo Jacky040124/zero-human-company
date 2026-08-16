@@ -1,203 +1,102 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { useDemo } from '../../state/DemoContext'
 
-const EASE = [0.16, 1, 0.3, 1] as const
-const spring = { type: 'spring' as const, stiffness: 330, damping: 28 }
-const SOURCE_MS = 950
-
-const SOURCES = [
-  { label: 'LinkedIn', found: 11 },
-  { label: 'Maps', found: 8 },
-  { label: 'Customs filings', found: 14 },
-  { label: 'Trade directories', found: 7 },
-  { label: 'Showrooms', found: 9 },
-] as const
-
-const FOUND_TOTAL = SOURCES.reduce((sum, source) => sum + source.found, 0)
-
-type Phase = 'idle' | 'scanning' | 'done'
-
 export function Discovery() {
-  const { startDiscovery, discoveryRemaining, apiConnected, runtimeError } = useDemo()
+  const { searchBuyers, discoveryRound, addToPipeline, leads } = useDemo()
   const reduceMotion = Boolean(useReducedMotion())
-  const [phase, setPhase] = useState<Phase>('idle')
-  const [activeIndex, setActiveIndex] = useState(0)
-  const [lastAdded, setLastAdded] = useState<number | null>(null)
-  const finishRef = useRef(startDiscovery)
-  finishRef.current = startDiscovery
-
-  const scanning = phase === 'scanning'
-  const canStart = !apiConnected && !scanning && discoveryRemaining > 0
-  const found = SOURCES.slice(0, Math.min(activeIndex, SOURCES.length)).reduce(
-    (sum, source) => sum + source.found,
-    0,
-  )
-
-  const finishRound = () => {
-    const added = finishRef.current()
-    setLastAdded(added)
-    setActiveIndex(SOURCES.length)
-    setPhase('done')
-  }
+  const [loading, setLoading] = useState(!discoveryRound)
+  const [error, setError] = useState<string | null>(null)
+  const fetchedRef = useRef(false)
 
   useEffect(() => {
-    if (phase !== 'scanning') return
+    if (discoveryRound || fetchedRef.current) return
+    fetchedRef.current = true
+    setLoading(true)
+    searchBuyers({ region: 'Europe', buyerType: 'importer', maxResults: 8 })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'Apollo search failed')
+      })
+      .finally(() => setLoading(false))
+  }, [discoveryRound, searchBuyers])
 
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout>
-
-    const run = (index: number) => {
-      if (cancelled) return
-      setActiveIndex(index)
-      if (index >= SOURCES.length) {
-        timer = setTimeout(() => {
-          if (!cancelled) finishRound()
-        }, 280)
-        return
-      }
-      timer = setTimeout(() => run(index + 1), SOURCE_MS)
-    }
-
-    run(0)
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-  }, [phase])
-
-  const onStart = () => {
-    if (!canStart) return
-    setLastAdded(null)
-    if (reduceMotion) {
-      finishRound()
-      return
-    }
-    setActiveIndex(0)
-    setPhase('scanning')
-  }
+  const companies = discoveryRound?.companies ?? []
+  const inPipeline = (name: string, id: string) =>
+    leads.some((lead) => lead.id === id || lead.company.toLowerCase() === name.toLowerCase())
 
   return (
     <div>
       <h1 className="text-3xl font-semibold tracking-tight text-ink">Discovery</h1>
       <p className="mt-1 text-sm text-muted">
-        {apiConnected
-          ? 'Discovery is controlled by the persisted workflow.'
-          : runtimeError
-            ? 'Offline · local preview with fixture buyers.'
-            : 'Local preview animation · add fixture buyers to the Pipeline.'}
+        Buyers Bobby found. Add the ones you want to the pipeline.
       </p>
 
-      <div className="mt-6 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={onStart}
-          disabled={!canStart}
-          className={`cursor-pointer rounded-lg border-0 px-4 py-2.5 text-sm font-medium transition-colors ${
-            canStart
-              ? 'bg-accent text-white hover:bg-accent/90'
-              : 'cursor-not-allowed bg-hover text-faint'
-          }`}
-        >
-          {scanning
-            ? 'Scanning…'
-            : apiConnected
-              ? 'Managed by persisted workflow'
-            : discoveryRemaining === 0 && lastAdded !== null
-              ? `Round complete · ${lastAdded} added`
-              : 'Start new round'}
-        </button>
-        {phase === 'done' && lastAdded !== null && discoveryRemaining > 0 ? (
-          <p className="text-sm text-muted">Round complete · {lastAdded} added</p>
-        ) : null}
-        {discoveryRemaining === 0 && lastAdded !== null ? (
-          <p className="text-xs text-faint">No more rounds in this demo.</p>
-        ) : null}
-      </div>
+      {loading ? (
+        <div className="mt-8 max-w-3xl rounded-xl border border-black/8 bg-bg px-4 py-6">
+          <p className="text-sm text-ink">Searching Apollo for buyers…</p>
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/8">
+            <motion.div
+              className="h-full rounded-full bg-accent"
+              initial={{ width: '12%' }}
+              animate={reduceMotion ? { width: '55%' } : { width: ['18%', '78%', '42%'] }}
+              transition={reduceMotion ? { duration: 0 } : { duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
+            />
+          </div>
+        </div>
+      ) : null}
 
-      <AnimatePresence>
-        {phase !== 'idle' ? (
-          <motion.div
-            initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={reduceMotion ? { duration: 0 } : { duration: 0.35, ease: EASE }}
-            className="mt-6 max-w-lg rounded-xl border border-black/8 bg-bg px-4 py-4"
-          >
-            <div className="space-y-3">
-              {SOURCES.map((source, index) => {
-                const done = index < activeIndex
-                const current = scanning && index === activeIndex
+      {error ? <p className="mt-6 text-sm text-danger">{error}</p> : null}
+
+      {!loading && companies.length > 0 ? (
+        <div className="mt-6 max-w-3xl overflow-hidden rounded-xl border border-black/8 bg-bg">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-line text-xs text-muted">
+                <th className="px-4 py-2.5 font-medium">Company</th>
+                <th className="px-4 py-2.5 font-medium">Country</th>
+                <th className="px-4 py-2.5 font-medium">Website</th>
+                <th className="px-4 py-2.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {companies.map((company) => {
+                const added = inPipeline(company.name, company.externalCompanyId)
                 return (
-                  <div key={source.label}>
-                    <div className="flex items-baseline justify-between gap-3">
-                      <p
-                        className={`text-sm ${
-                          done || current ? 'text-ink' : 'text-faint'
-                        }`}
-                      >
-                        {source.label}
-                      </p>
-                      {done ? (
-                        <span className="text-[0.65rem] font-medium text-good">Done</span>
-                      ) : current ? (
-                        <span className="text-[0.65rem] text-muted">Scanning</span>
+                  <tr key={company.externalCompanyId} className="border-b border-line last:border-b-0">
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-ink">{company.name}</p>
+                      {company.description ? (
+                        <p className="mt-0.5 max-w-xs truncate text-xs text-muted">{company.description}</p>
                       ) : null}
-                    </div>
-                    <div className="relative mt-1.5 h-1 overflow-hidden rounded-full bg-line">
-                      <motion.div
-                        className="h-full rounded-full bg-accent"
-                        initial={false}
-                        animate={{ width: done || (current && reduceMotion) ? '100%' : current ? '100%' : '0%' }}
-                        transition={
-                          current && !reduceMotion
-                            ? { duration: SOURCE_MS / 1000, ease: EASE }
-                            : { duration: 0 }
-                        }
-                      />
-                      {current && !reduceMotion ? (
-                        <motion.div
-                          className="pointer-events-none absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/80 to-transparent"
-                          animate={{ x: ['-120%', '320%'] }}
-                          transition={{ duration: 0.85, repeat: Infinity, ease: 'linear' }}
-                        />
-                      ) : null}
-                    </div>
-                  </div>
+                    </td>
+                    <td className="px-4 py-3 text-muted">{company.country ?? '—'}</td>
+                    <td className="max-w-[12rem] truncate px-4 py-3 text-muted">
+                      {company.website ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {added ? (
+                        <span className="text-xs font-medium text-good">✓ In pipeline</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => addToPipeline(company)}
+                          className="cursor-pointer rounded-md border-0 bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent/90"
+                        >
+                          Add to pipeline
+                        </button>
+                      )}
+                    </td>
+                  </tr>
                 )
               })}
-            </div>
+            </tbody>
+          </table>
+        </div>
+      ) : null}
 
-            <p className="mt-4 text-sm text-ink">
-              found{' '}
-              <motion.span
-                key={found}
-                initial={reduceMotion ? false : { opacity: 0.4 }}
-                animate={{ opacity: 1 }}
-                transition={spring}
-                className="font-medium tabular-nums"
-              >
-                {phase === 'done' ? FOUND_TOTAL : found}
-              </motion.span>{' '}
-              candidates
-            </p>
-
-            {phase === 'done' && lastAdded !== null ? (
-              <motion.p
-                initial={reduceMotion ? false : { opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={reduceMotion ? { duration: 0 } : { duration: 0.35, ease: EASE }}
-                className="mt-2 text-sm text-ink"
-              >
-                {lastAdded} new buyers added to{' '}
-                <Link to="/app/buyers" className="text-accent no-underline hover:underline">
-                  Pipeline
-                </Link>
-              </motion.p>
-            ) : null}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+      {!loading && !error && companies.length === 0 ? (
+        <p className="mt-6 text-sm text-muted">Apollo returned no companies.</p>
+      ) : null}
     </div>
   )
 }

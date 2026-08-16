@@ -364,14 +364,13 @@ export async function runTeracCampaignStudy(demoRunId: string, registry: Provide
   await appendRunEventOnce(demoRunId, { type: 'study.completed', status: 'READY_FOR_APPROVAL', summary: `Terac selected ${winner.label} with a ${(selectedScore - baselineScore).toFixed(2)}-point average lift.`, actor: 'terac', proofRef: result.externalId })
 }
 
-export async function discoverResearchLeads(demoRunId: string, registry: ProviderRegistry): Promise<void> {
-  const result = await plannedAction(registry, demoRunId, Provider.MONID, 'runtime-research-discovery', `monid-discovery:${demoRunId}`, {
-    query: 'European furniture importers buying upholstered sofas or dining furniture from China',
-    maxResults: 8,
-    filters: { region: 'Europe', buyerType: 'importer' },
-  })
-  const data = result.data as unknown as MonidDiscoveryResult
+export async function persistResearchCompanies(
+  demoRunId: string,
+  result: { live: boolean; externalId: string; data: unknown },
+): Promise<number> {
+  const data = result.data as MonidDiscoveryResult
   const run = await db.demoRun.findUniqueOrThrow({ where: { id: demoRunId } })
+  let added = 0
   for (const company of data.companies) {
     const providerMatch = await db.company.findFirst({ where: { demoRunId, monidProviderId: company.externalCompanyId } })
     const nameMatch = await db.company.findUnique({ where: { demoRunId_name: { demoRunId, name: company.name } } })
@@ -380,13 +379,27 @@ export async function discoverResearchLeads(demoRunId: string, registry: Provide
     const created = match.action === 'USE' ? match.company : await db.company.create({
         data: { demoRunId, name: company.name, website: company.website, country: company.country ?? 'Unknown', focus: company.description ?? 'Furniture importing', monidProviderId: company.externalCompanyId, monidLive: result.live, researchOnly: true },
       })
+    const existing = await db.opportunity.findUnique({
+      where: { demoRunId_companyId: { demoRunId, companyId: created.id } },
+    })
     await db.opportunity.upsert({
       where: { demoRunId_companyId: { demoRunId, companyId: created.id } },
       create: { demoRunId, campaignId: run.campaignId, companyId: created.id },
       update: {},
     })
+    if (match.action === 'CREATE' && !existing) added += 1
   }
   await appendRunEventOnce(demoRunId, { type: 'research.completed', status: 'COMPLETE', summary: `Monid discovered ${data.companies.length} research-only companies. None were messaged.`, actor: 'monid', proofRef: result.externalId })
+  return added
+}
+
+export async function discoverResearchLeads(demoRunId: string, registry: ProviderRegistry): Promise<void> {
+  const result = await plannedAction(registry, demoRunId, Provider.MONID, 'runtime-research-discovery', `monid-discovery:${demoRunId}`, {
+    query: 'European furniture importers buying upholstered sofas or dining furniture from China',
+    maxResults: 8,
+    filters: { region: 'Europe', buyerType: 'importer' },
+  })
+  await persistResearchCompanies(demoRunId, result)
 }
 
 export async function sendNordlichtOutreach(demoRunId: string, registry: ProviderRegistry): Promise<void> {

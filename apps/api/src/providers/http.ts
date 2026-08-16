@@ -31,3 +31,10 @@ export function bearerHeaders(apiKey: string, idempotencyKey?: string): Record<s
     ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
   }
 }
+
+export function xApiKeyHeaders(apiKey: string): Record<string, string> {
+  return {
+    'X-API-Key': apiKey,
+    'content-type': 'application/json',
+  }
+}

@@ -185,6 +185,17 @@ function queryParameterNames(value: unknown): Set<string> {
   return new Set(Object.keys(properties))
 }
 
+function apolloSearchQuery(request: MonidDiscoveryRequest): Record<string, unknown> {
+  const region = typeof request.filters?.region === 'string' ? request.filters.region : 'Europe'
+  const buyerType = typeof request.filters?.buyerType === 'string' ? request.filters.buyerType : 'importer'
+  return {
+    'q_organization_keyword_tags[]': [request.query, 'furniture', buyerType],
+    'organization_locations[]': [region],
+    page: 1,
+    per_page: Math.min(Math.max(request.maxResults ?? 8, 1), 25),
+  }
+}
+
 function buildApolloQuery(request: MonidDiscoveryRequest, queryParams: unknown): Record<string, unknown> {
   const names = queryParameterNames(queryParams)
   const keywordKey = ['q_organization_keyword_tags[]', 'q_organization_keyword_tags', 'q_organization_keyword'].find((key) => names.has(key))
@@ -192,14 +203,13 @@ function buildApolloQuery(request: MonidDiscoveryRequest, queryParams: unknown):
   if (!keywordKey || !locationKey) {
     throw new Error('Monid Apollo endpoint does not expose the required keyword and location query parameters')
   }
-  const region = typeof request.filters?.region === 'string' ? request.filters.region : 'Europe'
-  const buyerType = typeof request.filters?.buyerType === 'string' ? request.filters.buyerType : 'importer'
+  const defaults = apolloSearchQuery(request)
   const query: Record<string, unknown> = {
-    [keywordKey]: [request.query, 'furniture', buyerType],
-    [locationKey]: [region],
+    [keywordKey]: defaults['q_organization_keyword_tags[]'],
+    [locationKey]: defaults['organization_locations[]'],
   }
-  if (names.has('page')) query.page = 1
-  if (names.has('per_page')) query.per_page = Math.min(Math.max(request.maxResults ?? 8, 1), 100)
+  if (names.has('page')) query.page = defaults.page
+  if (names.has('per_page')) query.per_page = defaults.per_page
   return query
 }
 
@@ -276,6 +286,11 @@ export class MonidDiscoveryProvider implements ProviderPort<MonidDiscoveryReques
     this.requestUrl(this.routes.runStatus('preflight'), 'run status route')
   }
 
+  async searchApollo(request: ProviderRequest<MonidDiscoveryRequest>): Promise<ProviderResult<MonidDiscoveryResult>> {
+    await this.preflight()
+    return this.startApolloRun(request, { queryParams: apolloSearchQuery(request.payload) })
+  }
+
   async execute(request: ProviderRequest<MonidDiscoveryRequest>): Promise<ProviderResult<MonidDiscoveryResult>> {
     await this.preflight()
     const discovery = discoverResponseSchema.parse(await this.readOnlyCall('discovery', this.routes.discover, {
@@ -295,8 +310,13 @@ export class MonidDiscoveryProvider implements ProviderPort<MonidDiscoveryReques
     if (inspected.provider.toLowerCase() !== ALLOWED_PROVIDER || inspected.endpoint !== ALLOWED_ENDPOINT) {
       throw new Error('Monid inspect returned a different endpoint than the allowlisted discovery result')
     }
-    const runInput = buildInspectedInput(request.payload, inspected)
+    return this.startApolloRun(request, buildInspectedInput(request.payload, inspected))
+  }
 
+  private async startApolloRun(
+    request: ProviderRequest<MonidDiscoveryRequest>,
+    runInput: Record<string, unknown>,
+  ): Promise<ProviderResult<MonidDiscoveryResult>> {
     let started: unknown
     try {
       started = await this.call(this.routes.run, {

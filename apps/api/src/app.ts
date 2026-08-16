@@ -8,7 +8,11 @@ import { getConfig } from './config.js'
 import { registerAuthRoutes } from './auth.js'
 import { toPublicHttpError } from './http-errors.js'
 import { openapiDocument } from './openapi.js'
+import { registerCatalogRoutes } from './routes/catalog.js'
 import { registerDemoRoutes } from './routes/demo.js'
+import { registerDiscoveryRoutes } from './routes/discovery.js'
+import { registerOutreachRoutes } from './routes/outreach.js'
+import { registerUserRoutes } from './routes/users.js'
 import { registerProviderRoutes } from './routes/providers.js'
 
 interface BuildAppOptions {
@@ -32,7 +36,16 @@ function isBackendPath(url: string): boolean {
 export async function buildApp(options: BuildAppOptions = {}) {
   const config = getConfig()
   const app = Fastify({
-    logger: { redact: ['req.headers.authorization', 'req.headers.cookie', 'body.password'] },
+    logger: {
+      redact: [
+        'req.headers.authorization',
+        'req.headers.cookie',
+        'req.headers.x-api-key',
+        'body.password',
+        'body.pdfBase64',
+        'body.text',
+      ],
+    },
     routerOptions: {
       onBadUrl: (_path, _request, response) => {
         response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
@@ -54,7 +67,11 @@ export async function buildApp(options: BuildAppOptions = {}) {
   app.get('/healthz', async () => ({ ok: true, judgeMode: config.JUDGE_MODE }))
   app.get('/api/v1/openapi.json', async () => openapiDocument)
   registerAuthRoutes(app)
+  registerCatalogRoutes(app)
   registerDemoRoutes(app)
+  registerDiscoveryRoutes(app)
+  registerOutreachRoutes(app)
+  registerUserRoutes(app)
   registerProviderRoutes(app)
 
   const webRoot = options.webRoot ?? fileURLToPath(new URL('../../../dist', import.meta.url))

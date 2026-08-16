@@ -23,8 +23,22 @@ import {
   decideCampaign as decideCampaignRequest,
   getActiveRun,
   loginOwner as loginOwnerRequest,
+  draftOutreach as draftOutreachRequest,
+  searchBuyers as searchBuyersRequest,
   subscribeToRun,
+  type BuyerSearchCompany,
+  type BuyerSearchResponse,
 } from '../api/runtime'
+
+export type DiscoveryRound = {
+  round: number
+  region: string
+  buyerType: string
+  query: string
+  companies: BuyerSearchCompany[]
+  added: number
+  persisted: boolean
+}
 
 export type Activity = {
   id: number
@@ -145,6 +159,10 @@ type DemoState = {
   sendLeadMessage: (id: string, body: string) => void
   leadTyping: Record<string, boolean>
   startDiscovery: () => number
+  searchBuyers: (input?: { query?: string; region?: string; buyerType?: string; maxResults?: number }) => Promise<BuyerSearchResponse>
+  discoveryRound: DiscoveryRound | null
+  addToPipeline: (company: BuyerSearchCompany) => void
+  ensureLeadEmail: (lead: Lead) => Promise<void>
   discoveryRemaining: number
   runtimeRun: DemoRunSnapshot | null
   apiConnected: boolean
@@ -204,14 +222,18 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const [runtimeRun, setRuntimeRun] = useState<DemoRunSnapshot | null>(null)
   const [apiConnected, setApiConnected] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const [discoveryRound, setDiscoveryRound] = useState<DiscoveryRound | null>(null)
   const eventIndex = useRef(0)
   const activityId = useRef(1)
   const replyTimers = useRef<ReturnType<typeof setTimeout>[]>([])
   const pendingReplies = useRef<Record<string, number>>({})
   const leadsRef = useRef(leads)
+  const threadsRef = useRef(threads)
+  const draftingRef = useRef(new Set<string>())
   const msgSeq = useRef(0)
   const runtimeOrder = useRef<{ runId: string; sequence: number; updatedAt: number } | null>(null)
   leadsRef.current = leads
+  threadsRef.current = threads
 
   const applyRuntime = useCallback((snapshot: DemoRunSnapshot) => {
     const nextOrder = {
@@ -256,8 +278,15 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     setApiConnected(true)
     setRuntimeError(null)
     setLeads(runtimeLeads)
-    setLeadAutonomyMap(Object.fromEntries(runtimeLeads.map((lead) => [lead.id, false])))
-    setThreads(Object.fromEntries(runtimeLeads.map((lead) => [lead.id, []])))
+    setLeadAutonomyMap(Object.fromEntries(runtimeLeads.map((lead) => [lead.id, true])))
+    setThreads((current) => {
+      const next: Record<string, ThreadMessage[]> = {}
+      for (const lead of runtimeLeads) {
+        const existing = current[lead.id] ?? []
+        next[lead.id] = existing.some((message) => message.source === 'llm') ? existing : []
+      }
+      return next
+    })
     setLeadTyping({})
     setActivity(
       snapshot.timeline.slice(0, 8).map((event) => ({
@@ -362,10 +391,6 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const sendLeadMessage = useCallback((id: string, body: string) => {
     const trimmed = body.trim()
     if (!trimmed) return
-    if (apiConnected) {
-      setRuntimeError('Manual sends are disabled during an autonomous run.')
-      return
-    }
 
     const outboundId = `${id}-manual-${++msgSeq.current}`
     setThreads((current) => ({
@@ -404,7 +429,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       }
     }, 2500)
     replyTimers.current.push(timer)
-  }, [apiConnected])
+  }, [])
 
   const sendMessage = useCallback(
     (body: string) => {
@@ -414,20 +439,12 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   )
 
   const setLeadAutonomy = useCallback((id: string, value: boolean) => {
-    if (apiConnected) {
-      setRuntimeError('Per-buyer autonomy is read-only during a connected run.')
-      return
-    }
     setLeadAutonomyMap((current) => ({ ...current, [id]: value }))
-  }, [apiConnected])
+  }, [])
 
   const DISCOVERY_BATCH = 3
 
   const startDiscovery = useCallback(() => {
-    if (apiConnected) {
-      setRuntimeError('Discovery is controlled by the connected backend run.')
-      return 0
-    }
     const existing = new Set(leadsRef.current.map((lead) => lead.id))
     const next = discoveryLeads.filter((lead) => !existing.has(lead.id)).slice(0, DISCOVERY_BATCH)
     if (next.length === 0) return 0
@@ -452,7 +469,104 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       ].slice(0, 8),
     )
     return next.length
-  }, [apiConnected])
+  }, [])
+
+  const ensureLeadEmail = useCallback(async (lead: Lead) => {
+    const existing = threadsRef.current[lead.id] ?? []
+    const hasCleanDraft = existing.some((message) => (
+      message.source === 'llm'
+      && !/\[(?:your\s+)?name\]|your name/i.test(message.body)
+    ))
+    if (hasCleanDraft) return
+    if (draftingRef.current.has(lead.id)) return
+    draftingRef.current.add(lead.id)
+    try {
+      const draft = await draftOutreachRequest({
+        company: lead.company,
+        country: lead.country,
+        description: lead.focus,
+        buyer: lead.buyer,
+        focus: lead.focus,
+      })
+      setThreads((current) => ({
+        ...current,
+        [lead.id]: [{
+          id: `llm-${lead.id}-m1`,
+          from: 'Lead Factory',
+          role: 'quay',
+          time: 'Just now',
+          body: draft.body,
+          subject: draft.subject,
+          toName: draft.contactName,
+          toEmail: draft.contactEmail,
+          source: 'llm',
+        }],
+      }))
+    } finally {
+      draftingRef.current.delete(lead.id)
+    }
+  }, [])
+
+  const searchBuyers = useCallback(async (input: { query?: string; region?: string; buyerType?: string; maxResults?: number } = {}) => {
+    const result = await searchBuyersRequest(input)
+    setActivity((current) =>
+      [
+        {
+          id: activityId.current++,
+          time: nowLabel(),
+          text: `Apollo found ${result.companies.length} research-only companies`,
+        },
+        ...current,
+      ].slice(0, 8),
+    )
+    setDiscoveryRound((current) => ({
+      round: (current?.round ?? 0) + 1,
+      region: input.region ?? current?.region ?? 'Europe',
+      buyerType: input.buyerType ?? current?.buyerType ?? 'importer',
+      query: result.query,
+      companies: result.companies,
+      added: result.added,
+      persisted: result.persisted,
+    }))
+    return result
+  }, [])
+
+  const addToPipeline = useCallback((company: BuyerSearchCompany) => {
+    const exists = leadsRef.current.some(
+      (lead) => lead.id === company.externalCompanyId
+        || lead.company.toLowerCase() === company.name.toLowerCase(),
+    )
+    if (exists) return
+    const webHost = company.website?.replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, '')
+    const place = company.country ?? webHost ?? 'Web lead'
+    const lead: Lead = {
+      id: company.externalCompanyId,
+      company: company.name,
+      city: place,
+      country: place,
+      countryCode: countryCode(company.country ?? ''),
+      buyer: 'Research only',
+      title: 'Research candidate',
+      focus: company.description ?? 'Furniture importing',
+      status: 'sourcing',
+      worker: 'Research only',
+      lastAction: 'Added from Discovery',
+      containers: 'n/a',
+    }
+    setLeads((current) => [...current, lead])
+    setLeadAutonomyMap((current) => ({ ...current, [lead.id]: true }))
+    setThreads((current) => ({ ...current, [lead.id]: [] }))
+    setActivity((current) =>
+      [
+        {
+          id: activityId.current++,
+          time: nowLabel(),
+          text: `${company.name} added to pipeline`,
+        },
+        ...current,
+      ].slice(0, 8),
+    )
+  }, [])
 
   const discoveryRemaining = apiConnected
     ? 0
@@ -497,6 +611,10 @@ export function DemoProvider({ children }: { children: ReactNode }) {
         sendLeadMessage,
         leadTyping,
         startDiscovery,
+        searchBuyers,
+        discoveryRound,
+        addToPipeline,
+        ensureLeadEmail,
         discoveryRemaining,
         runtimeRun,
         apiConnected,

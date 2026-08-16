@@ -92,6 +92,26 @@ enum PaymentProviderMode {
   FAKE
 }
 
+model AppUser {
+  id         String      @id @default(cuid())
+  email      String      @unique
+  name       String
+  createdAt  DateTime    @default(now())
+  magicLinks MagicLink[]
+}
+
+model MagicLink {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  user      AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
 model Workspace {
   id              String           @id @default(cuid())
   name            String

@@ -53,7 +53,7 @@ function contractClose(lead: Lead): ThreadMessage {
 }
 
 export function makeThread(lead: Lead): ThreadMessage[] {
-  if (lead.id === 'nordlicht') return nordlichtThread
+  if (lead.id === 'nordlicht' || lead.company.includes('Nordlicht')) return nordlichtThread
 
   const intro = outboundLetter(lead)
   if (lead.status === 'sourcing') return [intro]

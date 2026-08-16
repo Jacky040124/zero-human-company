@@ -1,11 +1,10 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { Logo } from '../../components/Logo'
-import { StatusPill } from '../../components/ui'
 import { factory } from '../../data'
-import { useDemo } from '../../state/DemoContext'
+import { getMe, signOut, type AppUser } from '../../api/runtime'
 
 const nav = [
-  { to: '/app/dashboard', label: 'Dashboard' },
   { to: '/app/discovery', label: 'Discovery' },
   { to: '/app/buyers', label: 'Pipeline' },
   { to: '/app/catalog', label: 'Catalog' },
@@ -13,18 +12,36 @@ const nav = [
 ]
 
 export function AppShell() {
-  const { leads, autopilot, setAutopilot, apiConnected, runtimeRun, runtimeError } = useDemo()
-  const activeOpportunities = leads.filter(
-    (lead) => lead.status !== 'contract'
-      && lead.runtimeStage !== 'PAUSED'
-      && lead.runtimeStage !== 'LOST',
-  ).length
-  const reconnecting = runtimeError === 'Live updates are reconnecting'
+  const [user, setUser] = useState<AppUser | null>(null)
+  const [userLoaded, setUserLoaded] = useState(false)
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    let cancelled = false
+    getMe()
+      .then((me) => {
+        if (!cancelled) setUser(me)
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setUserLoaded(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const onSignOut = () => {
+    void signOut().then(() => {
+      setUser(null)
+      navigate('/login')
+    })
+  }
 
   return (
     <div className="flex min-h-svh bg-bg">
       <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-sidebar px-3 py-4">
-        <Logo to="/app/dashboard" />
+        <Logo to="/app/discovery" />
         <nav className="mt-6 flex flex-col gap-0.5">
           {nav.map((item) => (
             <NavLink
@@ -55,35 +72,33 @@ export function AppShell() {
               {factory.city} · {factory.workers} people · {factory.exportShare} export
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            {apiConnected && runtimeRun ? (
-              <StatusPill tone={reconnecting || runtimeRun.status === 'FAILED' ? 'warn' : 'neutral'}>
-                Persisted snapshot · {reconnecting
-                  ? 'reconnecting'
-                  : runtimeRun.mode === 'FAKE'
-                    ? 'rehearsal'
-                    : runtimeRun.status.replaceAll('_', ' ').toLowerCase()}
-              </StatusPill>
+          {userLoaded ? (
+            user ? (
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent">
+                  {user.name[0]?.toUpperCase() ?? 'U'}
+                </span>
+                <div className="text-right">
+                  <p className="text-xs font-medium text-ink">{user.name}</p>
+                  <p className="text-[0.65rem] text-faint">{user.email}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onSignOut}
+                  className="cursor-pointer rounded-md border border-black/10 bg-bg px-2.5 py-1 text-xs text-muted hover:bg-hover hover:text-ink"
+                >
+                  Sign out
+                </button>
+              </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => setAutopilot(!autopilot)}
-                className="cursor-pointer border-0 bg-transparent p-0"
-                title="Toggle the local demo simulation"
+              <Link
+                to="/login"
+                className="rounded-md border border-black/10 bg-bg px-3 py-1.5 text-xs font-medium text-ink no-underline hover:bg-hover"
               >
-                {runtimeError ? (
-                  <StatusPill tone="warn">Offline · local preview</StatusPill>
-                ) : autopilot ? (
-                  <StatusPill>Local preview · Autopilot on</StatusPill>
-                ) : (
-                  <StatusPill tone="warn">Local preview · Autopilot paused</StatusPill>
-                )}
-              </button>
-            )}
-            <StatusPill>
-              {activeOpportunities} {apiConnected ? 'active opportunities' : 'preview opportunities'}
-            </StatusPill>
-          </div>
+                Sign in
+              </Link>
+            )
+          ) : null}
         </header>
         <main className="min-w-0 flex-1 overflow-auto bg-canvas p-6">
           <Outlet />

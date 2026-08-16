@@ -178,6 +178,36 @@ describe('Monid discovery', () => {
     })
   })
 
+  it('searches Apollo directly without discover or inspect', async () => {
+    const { provider, transport } = providerWith([completedRun])
+    const result = await provider.searchApollo(request)
+
+    expect(result).toMatchObject({
+      externalId: 'monid:run-7',
+      live: true,
+      data: {
+        externalRunId: 'run-7',
+        researchOnly: true,
+        companies: [{ externalCompanyId: 'company-9', name: 'Nine Furniture GmbH', researchOnly: true }],
+      },
+    })
+    expect(transport.mock.calls.map((call) => [new URL(call[0]).pathname, call[1].method])).toEqual([
+      ['/v1/run', 'POST'],
+    ])
+    expect(JSON.parse(String(transport.mock.calls[0]?.[1]?.body))).toEqual({
+      provider: 'apollo',
+      endpoint: '/mixed_companies/search',
+      input: {
+        queryParams: {
+          'q_organization_keyword_tags[]': [request.payload.query, 'furniture', 'importer'],
+          'organization_locations[]': ['Europe'],
+          page: 1,
+          per_page: 8,
+        },
+      },
+    })
+  })
+
   it('supports the documented inspect.inputSchema shape and sends direct run input', async () => {
     const officialInspect = {
       provider: 'apollo',

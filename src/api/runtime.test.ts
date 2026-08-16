@@ -8,6 +8,7 @@ import {
   getRunProof,
   loginOwner,
   logoutOwner,
+  searchBuyers,
   subscribeToRun,
   verifyRun,
 } from './runtime'
@@ -150,6 +151,35 @@ describe('run API client', () => {
   it('rejects incomplete snapshots instead of leaking partial state into the UI', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ...snapshot, proof: undefined })))
     await expect(getRun('run-1')).rejects.toThrow()
+  })
+})
+
+describe('buyer search client', () => {
+  it('posts an Apollo search and parses research-only companies', async () => {
+    const body = {
+      live: true,
+      persisted: false,
+      demoRunId: null,
+      added: 0,
+      query: 'sofas',
+      companies: [{
+        externalCompanyId: 'company-9',
+        name: 'Nine Furniture GmbH',
+        website: 'https://nine.example',
+        country: 'Germany',
+        description: 'Furniture importer',
+        researchOnly: true,
+      }],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(body))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(searchBuyers({ query: 'sofas', region: 'Europe', maxResults: 8 })).resolves.toEqual(body)
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/discovery/search', expect.objectContaining({
+      credentials: 'same-origin',
+      method: 'POST',
+      body: JSON.stringify({ query: 'sofas', region: 'Europe', maxResults: 8 }),
+    }))
   })
 })
 

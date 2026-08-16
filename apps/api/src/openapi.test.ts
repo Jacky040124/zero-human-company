@@ -15,6 +15,8 @@ describe('frontend integration OpenAPI surface', () => {
       '/api/v1/demo-runs/{id}/verify',
       '/api/v1/demo-runs/{id}/activate',
       '/api/v1/demo-runs/{id}/campaign-decision',
+      '/api/v1/discovery/search',
+      '/api/v1/outreach/draft',
     ]))
   })
 
